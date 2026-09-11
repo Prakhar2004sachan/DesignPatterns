@@ -1,70 +1,72 @@
-/* Abstract Product */
-trait Button {
-    fn paint(&self);
+/*
+ * Abstract Factory Pattern (Approach 2: Enum / Parameterized Factory)
+ *
+ * In idiomatic Rust, instead of dynamic dispatch with traits and heap allocations (`Box<dyn Trait>`),
+ * we can leverage Rust's powerful enum system:
+ * - Avoids heap allocations (`Box`) and vtable indirection.
+ * - Entirely stack-allocated and resolved via static dispatch.
+ * - The compiler enforces exhaustive pattern matching across all OS variants.
+ */
+
+// 1. Family / Variant Enum
+// Represents the distinct families of related products (e.g., Windows vs Mac).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Os {
+    Windows,
+    Mac,
 }
 
-trait Checkbox {
-    fn paint(&self);
+// 2. Concrete Products
+// Products are parameterized by the OS variant and match on it during operations.
+struct Button {
+    os: Os,
 }
 
-
-/* Abstract Factory */
-trait GuiFactory {
-    fn create_button(&self) -> Box<dyn Button>;
-    fn create_checkbox(&self) -> Box<dyn Checkbox>;
-}
-
-/* Concrete Products: Windows */
-struct WindowsButton;
-impl Button for WindowsButton {
+impl Button {
     fn paint(&self) {
-        println!("Rendering Windows button");
+        match self.os {
+            Os::Windows => println!("Rendering Windows button"),
+            Os::Mac => println!("Rendering Mac button"),
+        }
     }
 }
-struct WindowsCheckbox;
-impl Checkbox for WindowsCheckbox {
+
+struct Checkbox {
+    os: Os,
+}
+
+impl Checkbox {
     fn paint(&self) {
-        println!("Rendering Windows checkbox");
+        match self.os {
+            Os::Windows => println!("Rendering Windows checkbox"),
+            Os::Mac => println!("Rendering Mac checkbox"),
+        }
     }
 }
 
-/* Concrete Products: Mac */
-struct MacButton;
-impl Button for MacButton {
-    fn paint(&self) {
-        println!("Rendering Mac button");
-    }
+// 3. Concrete Factory
+// The factory stores the selected OS family and produces consistent products for that family.
+struct GuiFactory {
+    os: Os,
 }
-struct MacCheckbox;
-impl Checkbox for MacCheckbox {
-    fn paint(&self) {
-        println!("Rendering Mac checkbox");
+
+impl GuiFactory {
+    fn new(os: Os) -> Self {
+        Self { os }
+    }
+
+    fn create_button(&self) -> Button {
+        Button { os: self.os }
+    }
+
+    fn create_checkbox(&self) -> Checkbox {
+        Checkbox { os: self.os }
     }
 }
 
-/* Concrete Factories */
-struct WindowsFactory;
-impl GuiFactory for WindowsFactory {
-    fn create_button(&self) -> Box<dyn Button> {
-        Box::new(WindowsButton)
-    }
-    fn create_checkbox(&self) -> Box<dyn Checkbox> {
-        Box::new(WindowsCheckbox)
-    }
-}
-
-struct MacFactory;
-impl GuiFactory for MacFactory {
-    fn create_button(&self) -> Box<dyn Button> {
-        Box::new(MacButton)
-    }
-    fn create_checkbox(&self) -> Box<dyn Checkbox> {
-        Box::new(MacCheckbox)
-    }
-}
-
-/* Client */
-fn render_factory(factory : &dyn GuiFactory) {
+// 4. Client Code
+// Operates on the factory to produce and render a cohesive family of UI components.
+fn render_factory(factory: &GuiFactory) {
     let button = factory.create_button();
     let checkbox = factory.create_checkbox();
 
@@ -73,13 +75,16 @@ fn render_factory(factory : &dyn GuiFactory) {
 }
 
 fn main() {
-    let os = "mac";
+    let os_str = "windows";
 
-    let factory : Box<dyn GuiFactory> = match os {
-        "windows" => Box::new(WindowsFactory),
-        "mac" => Box::new(MacFactory),
+    // Select the product family based on runtime configuration
+    let os = match os_str {
+        "windows" => Os::Windows,
+        "mac" => Os::Mac,
         _ => panic!("Unknown OS"),
     };
 
-    render_factory(&*factory);
+    let factory = GuiFactory::new(os);
+
+    render_factory(&factory);
 }
