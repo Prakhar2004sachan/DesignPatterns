@@ -1,0 +1,26 @@
+# Rust
+target/
+**/target/
+
+# Node / JS / TS
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+**/exercise.db
+
+# C++ build artifacts
+build/
+**/build/
+*.o
+*.out
+*.exe
+
+# OS / Editor
+.DS_Store
+Thumbs.db

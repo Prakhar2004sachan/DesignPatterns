@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "01_Abstract_Factory/rs",
+    "01_Abstract_Factory_Exercise/rs",
+    "02_Builder/rs",
+]
+resolver = "2"
