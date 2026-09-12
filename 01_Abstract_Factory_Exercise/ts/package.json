@@ -1,0 +1,22 @@
+{
+  "name": "p_01_abstract_factory_exercise-ts",
+  "version": "1.0.0",
+  "description": "01_Abstract_Factory_Exercise implementation in TypeScript",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "build": "tsc",
+    "run:dist": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.23.1",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "mysql2": "^3.24.4",
+    "pg": "^8.23.0"
+  }
+}

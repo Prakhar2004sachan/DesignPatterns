@@ -1,0 +1,14 @@
+{
+  "name": "p_01_abstract_factory_exercise-js",
+  "version": "1.0.0",
+  "description": "01_Abstract_Factory_Exercise implementation in JavaScript",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
