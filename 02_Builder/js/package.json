@@ -1,0 +1,14 @@
+{
+  "name": "p_02_builder-js",
+  "version": "1.0.0",
+  "description": "02_Builder implementation in JavaScript",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
