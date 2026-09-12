@@ -1,0 +1,17 @@
+{
+  "name": "p_02_builder-ts",
+  "version": "1.0.0",
+  "description": "02_Builder implementation in TypeScript",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node --experimental-strip-types src/index.ts",
+    "dev": "node --watch --experimental-strip-types src/index.ts",
+    "build": "tsc",
+    "run:dist": "node dist/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}
