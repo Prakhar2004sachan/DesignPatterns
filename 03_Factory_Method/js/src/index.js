@@ -81,8 +81,19 @@ const pdfDocument = () => ({
   save: () => console.log("PDF: save"),
 });
 
-function runEditor(createDocument) {
-  const doc = createDocument();
+function createDocument(type) {
+  switch (type) {
+    case "word":
+      return new WordDocument();
+    case "pdf":
+      return new PdfDocument();
+    default:
+      throw new Error(`Unknown type: ${type}`);
+  }
+}
+
+function runEditor(type) {
+  const doc = createDocument(type);
   doc.open();
   doc.edit();
   doc.save();
@@ -98,7 +109,7 @@ function main() {
   wordEditor.run();
   pdfEditor.run();
 
-  runEditor(pdfDocument);
+  runEditor("word");
 }
 
 main();
