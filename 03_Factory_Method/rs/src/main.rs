@@ -35,36 +35,28 @@ impl Document for PdfDocument {
 }
 
 // Creator ==> has real logic + factory method
-trait DocumentEditor {
-    fn create_document(&self) -> Box<dyn Document>;
+struct Editor<D: Document>{
+    document: D
+}
 
-    // Algorithm uses the product
+impl <D: Document> Editor<D> {
+    fn new(document: D) -> Self{
+        Editor { document }
+    }
+
     fn run(&self){
-        let doc = self.create_document();
-        doc.open();
-        doc.edit();
-        doc.save();
+        self.document.open();
+        self.document.edit();
+        self.document.save();
     }
 }
-
-struct WordEditor;
-impl DocumentEditor for WordEditor {
-    fn create_document(&self) -> Box<dyn Document> {
-        Box::new(WordDocument)
-    }
-}
-
-struct PdfEditor;
-impl DocumentEditor for PdfEditor{
-    fn create_document(&self) -> Box<dyn Document> {
-        Box::new(PdfDocument)
-    }
-}
-
 
 fn main() {
     println!("=== [Rust] 03_Factory_Method ===");
     
-    let editor: Box<dyn  DocumentEditor> = Box::new(WordEditor);
-    editor.run();
+    let pdf_editor = Editor::new(PdfDocument);
+    let word_editor = Editor::new(WordDocument);
+
+    pdf_editor.run();
+    word_editor.run();
 }
