@@ -1,5 +1,6 @@
 #include <iostream>
 #include <memory>
+#include <functional>
 
 // 03_Factory_Method Pattern - C++ Implementation
 
@@ -73,12 +74,21 @@ class PdfEditor : public DocumentEditor {
         }
 };
 
+void runEditor(const std::function<std::unique_ptr<Document>()>& create){
+    auto doc = create();
+    doc -> open();
+    doc -> edit();
+    doc -> save();
+}
+
 int main() {
     std::cout << "=== [C++] 03_Factory_Method ===" << std::endl;
     
     std::unique_ptr<DocumentEditor> editor = std::make_unique<WordEditor>();
 
     editor->run();
+
+    runEditor([] {return std::make_unique<PdfDocument>();});
 
     return 0;
 }
