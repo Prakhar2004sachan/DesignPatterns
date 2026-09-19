@@ -1,5 +1,6 @@
 // 03_Factory_Method Pattern - TypeScript Implementation
 
+//  Product
 abstract class Document {
   abstract open() : void;
   abstract edit() : void;
@@ -34,8 +35,30 @@ class PdfDocument extends Document {
   }
 }
 
+interface Documentv2 {
+  open() : void;
+  edit() : void;
+  save() : void;
+}
+
+class WordDocumentv2 implements Documentv2 {
+  open() {
+    console.log("Word: open");
+  }
+  edit() {
+    console.log("Word: edit");
+  }
+  save() {
+    console.log("Word: save");
+  }
+}
+
+// Creator
 abstract class DocumentEditor {
+
+  // Factory
   abstract createDocument() : Document;
+
   run() : void {
     const doc = this.createDocument();
     doc.open();
@@ -56,6 +79,17 @@ class PdfEditor extends DocumentEditor {
   }
 }
 
+interface Creator<T extends Documentv2>{
+  create() : T;
+}
+
+function runEditor<T extends Documentv2>(creator: Creator<T>): void {
+  const doc = creator.create();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
 function main(): void {
   console.log("=== [TypeScript] 03_Factory_Method ===");
 
@@ -64,6 +98,8 @@ function main(): void {
 
   wordEditor.run();
   pdfEditor.run();
+
+  runEditor({create: () => new WordDocument()});
 }
 
 main();
