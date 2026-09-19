@@ -69,6 +69,25 @@ class PdfEditor extends DocumentEditor {
   }
 }
 
+const wordDocument = () => ({
+  open: () => console.log("Word: open"),
+  edit: () => console.log("Word: edit"),
+  save: () => console.log("Word: save"),
+});
+
+const pdfDocument = () => ({
+  open: () => console.log("PDF: open"),
+  edit: () => console.log("PDF: edit"),
+  save: () => console.log("PDF: save"),
+});
+
+function runEditor(createDocument) {
+  const doc = createDocument();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
 
 function main() {
   console.log("=== [JavaScript] 03_Factory_Method ===");
@@ -78,6 +97,8 @@ function main() {
 
   wordEditor.run();
   pdfEditor.run();
+
+  runEditor(pdfDocument);
 }
 
 main();
