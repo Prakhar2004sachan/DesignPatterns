@@ -34,29 +34,43 @@ impl Document for PdfDocument {
     }
 }
 
-// Creator ==> has real logic + factory method
-struct Editor<D: Document>{
-    document: D
-}
-
-impl <D: Document> Editor<D> {
-    fn new(document: D) -> Self{
-        Editor { document }
-    }
-
-    fn run(&self){
-        self.document.open();
-        self.document.edit();
-        self.document.save();
+// 2. CREATOR (Abstract)
+trait Editor {
+    type Doc: Document;
+    // ===> THIS IS THE FACTORY METHOD <===
+    fn create_document(&self) -> Self::Doc;
+    // Core business logic relies on the factory method:
+    fn run(&self) {
+        let document = self.create_document();
+        document.open();
+        document.edit();
+        document.save();
     }
 }
+// 3. CONCRETE CREATORS (They decide which Product to instantiate)
+struct WordEditor;
+impl Editor for WordEditor {
+    type Doc = WordDocument;
+    fn create_document(&self) -> Self::Doc {
+        WordDocument
+    }
+}
+struct PdfEditor;
+impl Editor for PdfEditor {
+    type Doc = PdfDocument;
+    fn create_document(&self) -> Self::Doc {
+        PdfDocument
+    }
+}
+
 
 fn main() {
     println!("=== [Rust] 03_Factory_Method ===");
     
-    let pdf_editor = Editor::new(PdfDocument);
-    let word_editor = Editor::new(WordDocument);
-
+    // Client works with the Creator:
+    let pdf_editor = PdfEditor;
+    let word_editor = WordEditor;
+    
     pdf_editor.run();
     word_editor.run();
 }
