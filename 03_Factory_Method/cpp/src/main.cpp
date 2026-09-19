@@ -81,6 +81,14 @@ void runEditor(const std::function<std::unique_ptr<Document>()>& create){
     doc -> save();
 }
 
+template <typename Doc>
+void runEdiotorv2(){
+    Doc doc;
+    doc.open();
+    doc.edit();
+    doc.save();
+};
+
 int main() {
     std::cout << "=== [C++] 03_Factory_Method ===" << std::endl;
     
@@ -89,6 +97,8 @@ int main() {
     editor->run();
 
     runEditor([] {return std::make_unique<PdfDocument>();});
+
+    runEdiotorv2<WordDocument>();
 
     return 0;
 }

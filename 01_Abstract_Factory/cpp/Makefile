@@ -1,5 +1,8 @@
+SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
+SYSROOT_FLAG = $(if $(SDKROOT),-isysroot $(SDKROOT),)
+
 CXX ?= clang++
-CXXFLAGS ?= -std=c++20 -Wall -Wextra -O2
+CXXFLAGS ?= -std=c++20 -Wall -Wextra -O2 $(SYSROOT_FLAG)
 SRC = src/main.cpp
 TARGET = bin/Abstract_Factory
 
