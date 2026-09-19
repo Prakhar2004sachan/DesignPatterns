@@ -1,0 +1,14 @@
+{
+  "name": "p_03_factory_method-js",
+  "version": "1.0.0",
+  "description": "03_Factory_Method implementation in JavaScript",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
