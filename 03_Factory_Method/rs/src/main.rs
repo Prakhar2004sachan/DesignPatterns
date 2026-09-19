@@ -64,13 +64,30 @@ impl Editor for PdfEditor {
 }
 
 
+// Method 3
+
+fn run_editor<F, D>(create: F) 
+where  
+    F: Fn() -> D,
+    D: Document,
+{
+    let doc = create();
+    doc.open();
+    doc.edit();
+    doc.save();
+}
+
+
 fn main() {
     println!("=== [Rust] 03_Factory_Method ===");
     
     // Client works with the Creator:
     let pdf_editor = PdfEditor;
     let word_editor = WordEditor;
-    
+
     pdf_editor.run();
     word_editor.run();
+
+    run_editor(|| WordDocument);
+    run_editor(|| PdfDocument);
 }
