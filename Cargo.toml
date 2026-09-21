@@ -2,6 +2,6 @@
 members = [
     "01_Abstract_Factory/rs",
     "01_Abstract_Factory_Exercise/rs",
-    "02_Builder/rs", "02_Builder_Exercise/rs", "03_Factory_Method/rs",
+    "02_Builder/rs", "02_Builder_Exercise/rs", "03_Factory_Method/rs", "04_Prototype_Pattern/rs",
 ]
 resolver = "2"

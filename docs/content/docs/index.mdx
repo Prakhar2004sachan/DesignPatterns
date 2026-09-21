@@ -1,0 +1,84 @@
+---
+title: Design Patterns Lab & Revision Hub
+description: Multi-language design pattern implementations across Rust, C++20, TypeScript, and JavaScript with deep "Where I Got Stuck" debugging logs and active recall revision.
+---
+
+Welcome to the **Design Patterns Multi-Language Lab & Revision Hub**.
+
+This system is built for software engineers who want to master GoF design patterns not as abstract academic UML diagrams, but as **living, idiom-aware code** across four radically distinct programming languages:
+
+<Cards>
+  <Card title="Rust" description="Zero-cost abstractions, trait objects (dyn), borrow checker hurdles, ownership transfers, and typestates." />
+  <Card title="C++20" description="Value semantics, smart pointers (std::unique_ptr), virtual tables, RAII, and object slicing avoidance." />
+  <Card title="TypeScript" description="Structural type systems, interfaces vs abstract classes vs discriminated unions, and strict null safety." />
+  <Card title="JavaScript" description="Modern ES6+ classes, closures, duck typing, object composition, and prototypal inheritance." />
+</Cards>
+
+---
+
+## Why This Hub Exists: The Multi-Language Dilemma
+
+When you learn design patterns in one language (traditionally Java or C++98), you learn patterns tied to **class inheritance**. But when you try to write them in modern languages, you run into **paradigm dissonance**. What works seamlessly in an Object-Oriented language often feels forced in a functional or data-oriented language.
+
+<PatternDiagram chart={`
+graph TD
+    A["Traditional GoF Pattern (Class OOP)"] --> B["Rust: No Classes, No Inheritance!"]
+    A --> C["C++20: Raw Pointers are an Anti-Pattern!"]
+    A --> D["TypeScript: Discriminated Unions Often Beat Subclasses!"]
+    A --> E["JavaScript: Dynamic Duck Typing & Closures!"]
+    
+    B --> F["Friction: Borrow Checker, dyn Trait Object Safety, Lifetimes"]
+    C --> G["Friction: Missing Virtual Destructor, Object Slicing, Smart Pointer Covariance"]
+    D --> H["Friction: Structural Typing Quirks, Class vs Type vs Interface"]
+    E --> I["Friction: No Native Abstract Classes, 'this' Context Loss"]
+`} />
+
+This documentation hub is designed specifically to help you **remember where you got stuck**, **understand the underlying language friction**, and **revise patterns in minutes** before interviews or architectural decisions. We explain the "why" behind the code, so you truly understand how the patterns adapt to different paradigms.
+
+---
+
+## Fast Navigation
+
+### Core Framework & Diagnostic Tools
+- **[Decision Tree — Which Pattern When?](/docs/decision-guide)**: Interactive flowchart and language-specific selection notes to help you pick the right pattern.
+- **[Where I Got Stuck — Master Index](/docs/stuck-index)**: Real compiler errors and architectural traps, organized by language with detailed explanations on how to solve them.
+
+### Creational Patterns
+- **[01. Abstract Factory](/docs/creational/01-abstract-factory)** | **[Exercise](/docs/creational/01-abstract-factory-exercise)**
+- **[02. Builder (OOP vs Rust Typestate)](/docs/creational/02-builder)** | **[Exercise](/docs/creational/02-builder-exercise)**
+- **[03. Factory Method](/docs/creational/03-factory-method)**
+- **[04. Prototype Pattern](/docs/creational/04-prototype)**
+
+### Active Recall & Revision
+- **[Self-Quiz Flashcards](/docs/revision/flashcards)**: Revealable questions to test your knowledge — DI vs FM, Rust closures, TS lookup types, C++ vtables.
+- **[Language Paradigm Cheatsheet](/docs/revision/language-cheatsheet)**: Side-by-side memory management, dynamic dispatch, and typing comparisons across the four languages.
+
+### My Learning Journal — Rough Notes (Language-Separated)
+
+<Cards>
+  <Card title="Rust" href="/docs/rough-notes/rust" description="Problems: trait object safety, DI vs FM. Concepts: generics, closures, enum dispatch. Gotchas: closure types, stack sizing." />
+  <Card title="C++" href="/docs/rough-notes/cpp" description="Problems: macOS linker, virtual destructor. Concepts: virtual/vtable, unique_ptr, std::function. Gotchas: SBO, abstract class rules." />
+  <Card title="TypeScript" href="/docs/rough-notes/typescript" description="Problems: overload mismatch, readonly. Concepts: lookup types, typestate, structural typing. Gotchas: declare protected, double cast." />
+  <Card title="JavaScript" href="/docs/rough-notes/javascript" description="Problems: missing overrides, new.target, mutation. Concepts: abstract simulation with throw. Gotchas: silent failures, Object.freeze." />
+</Cards>
+
+### Archives & Source History
+- **[Originals](/docs/originals)**: Unabridged reference documentation (800+ lines per pattern) for deep dives and original context.
+
+
+---
+
+## Quick Shell Command: Scaffold a New Pattern
+
+To scaffold a new pattern across all four languages in the root workspace, use the provided bash script. This will automatically set up the boilerplate so you can focus on implementation:
+
+```bash
+./create-projects.sh <PatternName>
+```
+
+| Language | Directory | Run Command | Watch / Dev Command |
+| :--- | :--- | :--- | :--- |
+| **Rust** | `rs/` | `cargo run` | `cargo watch -x run` |
+| **JavaScript** | `js/` | `npm start` | `npm run dev` |
+| **TypeScript** | `ts/` | `npm start` | `npm run dev` |
+| **C++** | `cpp/` | `make run` | `make run` |

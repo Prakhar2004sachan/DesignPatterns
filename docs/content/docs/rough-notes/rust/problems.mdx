@@ -1,0 +1,122 @@
+---
+title: "Rust – Problems & Compiler Errors"
+description: "Every compiler error, ownership issue, and runtime crash I hit while implementing design patterns in Rust."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+> **Source of truth**: extracted from real coding sessions in the `DesignPattern` workspace.
+
+---
+
+## Problem 1 — Trait Object Safety: `Box<dyn Trait>` & `Clone`
+
+**Pattern**: Prototype / Abstract Factory  
+**Symptom**: `error[E0038]: the trait cannot be made into an object`
+
+### What Happened
+When I wrote `trait Prototype: Clone`, the compiler refused to allow `Box<dyn Prototype>`.
+
+### Root Cause
+`Clone` in the standard library defines `fn clone(&self) -> Self`. When used as `dyn Prototype`, the concrete type is erased, so `Self` has no known size. Rust requires every method in a dyn-safe trait to **not return `Self` by value**.
+
+### Fix
+Implement a boxed-clone helper instead:
+```rust
+fn clone_box(&self) -> Box<dyn Prototype>;
+```
+Because `Box<T>` is always pointer-sized (16 bytes on 64-bit), the return type is fixed.
+
+<Callout type="info">
+**Rule to remember**: Any trait that inherits `Clone`, or has a method returning `Self` by value, is **not object-safe** and cannot be used as `dyn Trait`.
+</Callout>
+
+---
+
+## Problem 2 — DI vs Factory Method confusion
+
+**Pattern**: Factory Method  
+**Symptom**: Code compiled and ran, but the pattern was wrong.
+
+### What Happened
+I wrote:
+```rust
+let pdf_editor = Editor::new(PdfDocument);
+```
+This means `main()` creates `PdfDocument` and hands it to `Editor`. The compiler didn't complain, but this is **Dependency Injection**, not **Factory Method**.
+
+### Root Cause
+In Factory Method, the **Creator** must own the creation logic internally via a factory method (`create_document()`). The business logic (`run()`) calls it internally. The client only chooses which Creator to instantiate.
+
+### Fix (proper Factory Method in Rust)
+```rust
+trait Editor {
+    type Doc: Document;
+    fn create_document(&self) -> Self::Doc;  // ← factory method
+    fn run(&self) {
+        let doc = self.create_document();     // ← called internally
+        doc.open(); doc.edit(); doc.save();
+    }
+}
+
+struct PdfEditor;
+impl Editor for PdfEditor {
+    type Doc = PdfDocument;
+    fn create_document(&self) -> PdfDocument { PdfDocument }
+}
+```
+
+<Callout type="warn">
+If `main()` creates the product and passes it in → that is DI. In Factory Method, the Creator instantiates the product itself.
+</Callout>
+
+---
+
+## Problem 3 — Abstract Factory: invalid `impl Trait for Struct`
+
+**Pattern**: Abstract Factory  
+**Symptom**: `impl GuiFactory for GuiFactory` was an error because `GuiFactory` was a struct, not a trait.
+
+### Root Cause
+I confused the abstract factory struct with a trait. In Rust, you write `impl Trait for Type`, not `impl StructName for StructName`.
+
+### Fix
+Use a plain `impl GuiFactory` inherent block with a `new(os: Os)` constructor, since the parameterized factory is a struct, not a trait:
+```rust
+impl GuiFactory {
+    fn new(os: Os) -> Self { GuiFactory { os } }
+    fn create_button(&self) -> Button { Button { os: self.os } }
+    fn create_checkbox(&self) -> Checkbox { Checkbox { os: self.os } }
+}
+```
+
+---
+
+## Problem 4 — Rust Warnings: `dead_code` on Pattern Methods
+
+**Pattern**: Builder  
+**Symptom**: `warning: method is never used: 'set_username'`
+
+### Root Cause
+Rust warns about methods that exist but are never called anywhere in `main()` or tests. During pattern implementation, you often define methods on the Builder that aren't exercised in `main()`.
+
+### Fix Options
+1. Use `#[allow(dead_code)]` above the struct or method.
+2. Actually call the method in `main()` or write a test.
+3. Prefix with `_` to signal intentional non-use: `fn _set_username(...)`.
+
+---
+
+## Problem 5 — `cargo` target directory committed to git
+
+**Symptom**: `git status` showed `target/` as a new untracked folder after `cargo build`.
+
+### Root Cause
+The `.gitignore` at the workspace root did not include `target/`.
+
+### Fix
+```
+# .gitignore
+target/
+```
+Run `git rm -r --cached target/` to untrack already-committed files.

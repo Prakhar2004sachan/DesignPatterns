@@ -1,0 +1,1020 @@
+---
+title: "TypeScript – Concepts I Learned"
+description: "Deep TypeScript concepts I understood during the Builder and Factory Method exercises."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+---
+
+## Concept 1 — `Record<string, string>` and Why It's Insufficient for Headers
+
+### 1. Is `: Record<string, string>` correct here?
+
+**Short answer: No, it introduces a subtle but critical bug called *Type Widening*.**
+
+Here is what happens when you write `: Record<string, string>`:
+
+```ts
+// The type annotation widens everything:
+export const Method: Record<string, string> = {
+  GET: "GET",
+  POST: "POST",
+  PUT: "PUT",
+  PATCH: "PATCH",
+  DELETE: "DELETE",
+} as const;
+
+export type Method = (typeof Method)[keyof typeof Method];
+```
+
+#### What goes wrong:
+1. **Explicit annotation overrides type inference**: When TypeScript sees `: Record<string, string>`, it ignores the specific literal keys (`"GET"`, `"POST"`, etc.) and values. The `as const` on the right-hand side is bypassed.
+2. **`type Method` collapses into generic `string`**:
+   - `typeof Method` becomes `Record<string, string>`.
+   - `keyof typeof Method` becomes `string | number`.
+   - `type Method` becomes `string` instead of `"GET" | "POST" | "PUT" | "PATCH" | "DELETE"`.
+3. **Loss of compile-time safety**:
+   ```ts
+   // With : Record<string, string>, this compiles without error!
+   builder.method("ANY_INVALID_STRING"); // Type safety is completely broken!
+   ```
+
+#### The Fix:
+If you want to ensure the object satisfies a record shape without widening the types, use TypeScript's **`satisfies`** keyword (introduced in TS 4.9):
+
+```ts
+// Type safety preserved: validates the shape without widening!
+export const Method = {
+  GET: "GET",
+  POST: "POST",
+  PUT: "PUT",
+  PATCH: "PATCH",
+  DELETE: "DELETE",
+} as const satisfies Record<string, string>;
+
+// Result:
+// type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+```
+
+---
+
+### 2. What is `Record<K, V>`?
+
+`Record<Keys, Type>` is a built-in TypeScript utility type. It represents an object whose **keys are of type `K`** and whose **values are of type `V`**.
+
+Under the hood, TypeScript defines it like this:
+```ts
+type Record<K extends keyof any, T> = {
+  [P in K]: T;
+};
+```
+
+---
+
+### 3. Real-World Use Cases with Small Examples
+
+#### Use Case 1: Dynamic Dictionary / Key-Val
+&lt;truncated 597 bytes>
+ecord`'s greatest superpower: **enforcing completeness over a union**. If you add a new value to the union and forget to define it in the `Record`, TypeScript will refuse to compile.
+
+```ts
+type UserRole = "admin" | "editor" | "viewer";
+
+// TypeScript FORCES you to handle every single role:
+const rolePermissions: Record<UserRole, string[]> = {
+  admin: ["create", "read", "update", "delete"],
+  editor: ["read", "update"],
+  viewer: ["read"],
+  // If you forget 'viewer', TS gives an error: Property 'viewer' is missing!
+};
+```
+
+```ts
+// Another example: HTTP method handlers
+type HttpVerb = "GET" | "POST" | "DELETE";
+
+const methodActions: Record<HttpVerb, (url: string) => void> = {
+  GET: (url) => console.log(`Fetching from ${url}`),
+  POST: (url) => console.log(`Creating at ${url}`),
+  DELETE: (url) => console.log(`Deleting at ${url}`),
+};
+```
+
+---
+
+#### Use Case 3: Numeric Lookup Tables (`Record<number, T>`)
+For objects indexed by numbers, such as HTTP status codes:
+
+```ts
+const httpStatusMessages: Record<number, string> = {
+  200: "OK",
+  201: "Created",
+  400: "Bad Request",
+  401: "Unauthorized",
+  404: "Not Found",
+  500: "Internal Server Error",
+};
+
+console.log(httpStatusMessages[404]); // "Not Found"
+```
+
+---
+
+#### Use Case 4: Localization & Translations
+```ts
+type SupportedLang = "en" | "es" | "de";
+
+const welcomeMessages: Record<SupportedLang, string> = {
+  en: "Welcome",
+  es: "Bienvenido",
+  de: "Willkommen",
+};
+```
+
+---
+
+### Summary Cheatsheet
+
+| Syntax | What It Does | Use Case |
+| :--- | :--- | :--- |
+| `const obj: Record<string, string>` | **Widens** types to generic `string` keys and values | Dynamic dictionaries where keys aren't known ahead of time |
+| `const obj: Record<"A" \| "B", number>` | Enforces that **all** union keys must be provided | Exhaustive lookup tables, role mappings, state handlers |
+| `const obj = { ... } as const satisfies Record<string, string>` | Checks that values match `string`, but **preserves literal types** | Enums-as-objects, constant dictionaries without type loss |
+
+---
+
+## Concept 2 — `readonly` and Immutability in TypeScript
+
+In TypeScript, **`readonly string[]`** (also written as `ReadonlyArray<string>`) creates an **immutable array type**. 
+
+Here is why `readonly` is used in `export type HeaderValue = string | readonly string[];`:
+
+---
+
+### 1. The Core Difference: `string[]` vs `readonly string[]`
+
+| Feature | `string[]` (Mutable) | `readonly string[]` (Immutable) |
+| :--- | :--- | :--- |
+| Read elements (`arr[0]`, `.length`) | Allowed | Allowed |
+| Non-mutating methods (`.map()`, `.filter()`, `.slice()`) | Allowed | Allowed |
+| Mutating methods (`.push()`, `.pop()`, `.splice()`) | Allowed | **TypeScript Error** |
+| Reassigning indices (`arr[0] = "new"`) | Allowed | **TypeScript Error** |
+
+---
+
+### 2. Two Critical Reasons Why It's Needed Here
+
+#### Reason A: It allows callers to pass `as const` or frozen arrays
+In TypeScript, **a mutable array (`string[]`) is assignable to `readonly string[]`**, but **not vice versa**.
+
+If `HeaderValue` were defined as just `string | string[]`:
+```ts
+// If HeaderValue was: string | string[]
+
+const standardAccept = ["application/json", "text/plain"] as const;
+// standardAccept has type: readonly ["application/json", "text/plain"]
+
+builder.header("Accept", standardAccept);
+// COMPILE ERROR!
+// The type 'readonly ["application/json", "text/plain"]' is 'readonly'
+// and cannot be assigned to the mutable type 'string[]'.
+```
+
+With `readonly string[]`:
+```ts
+// Both work smoothly!
+builder.header("Accept", ["application/json"]);           // Normal array: OK
+builder.header("Accept", ["application/json"] as const);  // Readonly array: OK
+```
+
+---
+
+#### Reason B: It guarantees the immutability of `HttpRequest`
+The exercise requirement states:
+> *"The resulting HttpRequest should be immutable — no setters after construction."*
+
+In [`HttpRequest`](file:///Users/prakharsachan/Developer/DesignPattern/02_Builder_Exercise/ts/src/index.ts#L35-L60), multi-value arrays are frozen with `Object.freeze()`:
+
+```ts
+const req = new DefaultHttpRequestBuilder()
+  .method(Method.GET)
+  .url("https://api.example.com")
+  .header("Accept", ["application/json", "text/html"])
+  .build();
+
+const acceptHeaders = req.getHeader("accept");
+
+if (Array.isArray(acceptHeaders)) {
+  // TypeScript catches this at compile time:
+  acceptHeaders.push("text/xml"); 
+  // Error: Property 'push' does not exist on type 'readonly string[]'
+}
+```
+
+Without `readonly`, TypeScript would falsely let the developer call `.push()`, only for JavaScript to crash at runtime with `TypeError: Cannot add property ..., object is not extensible` because the array is frozen. 
+
+### Summary
+`readonly string[]` tells TypeScript:
+1. **Callers can pass any array** (mutable or `as const` readonly).
+2. **Nobody is allowed to mutate the array** (`.push`, `.splice`, etc.) once passed or retrieved from the request.
+
+---
+
+## Concept 3 — `Readonly<Record<string, HeaderValue>>` Examples
+
+Here is a detailed breakdown of what:
+
+```ts
+readonly headers: Readonly<Record<string, HeaderValue>>;
+```
+
+actually does, with practical examples of what TypeScript allows and prevents.
+
+---
+
+### There are Two Different Layers of Protection Here:
+
+```
+readonly headers : Readonly<Record<string, HeaderValue>>;
+   ▲                              ▲
+   │                              │
+   │                              └─ Layer 2: Protects the ENTRIES inside the map
+   └──────────────────────────────── Layer 1: Protects the VARIABLE itself
+```
+
+---
+
+### Layer 1: The Outer `readonly` (Protects the property reference)
+
+Prevents anyone from replacing the entire `headers` object on the `HttpRequest` instance:
+
+```ts
+const req = new DefaultHttpRequestBuilder()
+  .method(Method.GET)
+  .url("https://api.example.com")
+  .header("Authorization", "Bearer token_123")
+  .build();
+
+// TypeScript COMPILE ERROR:
+req.headers = { "Authorization": "Bearer hacked_token" };
+// Error: Cannot assign to 'headers' because it is a read-only property.
+```
+
+---
+
+### Layer 2: The Inner `Readonly<...>` (Protects keys & values inside the map)
+
+Even if `req.headers` cannot be replaced, what if someone tries to **modify**, **add**, or **delete** a key *inside* `req.headers`?
+
+That is what `Readonly<Record<...>>` blocks:
+
+```ts
+// 1. Trying to overwrite an existing header key:
+req.headers["Authorization"] = "Bearer new_token";
+// Error: Index signature in type 'Readonly<Record<string, HeaderValue>>' only permits reading.
+
+// 2. Trying to add a new header:
+req.headers["X-Injected-Header"] = "malicious_value";
+// Error: Index signature in type 'Readonly<Record<string, HeaderValue>>' only permits reading.
+
+// 3. Trying to delete a header:
+delete req.headers["Authorization"];
+// Error: The operand of a 'delete' operator cannot be a read-only property.
+```
+
+---
+
+### Bonus Layer 3: The `HeaderValue` Protection (`string | readonly string[]`)
+
+What if a header has multiple values (an array)?
+
+```ts
+const req = new DefaultHttpRequestBuilder()
+  .method(Method.GET)
+  .url("https://api.example.com")
+  .header("Accept", ["application/json", "text/html"])
+  .build();
+
+const accept = req.headers["Accept"];
+
+if (Array.isArray(accept)) {
+  // Trying to mutate the internal array:
+  accept.push("application/xml");
+  // Error: Property 'push' does not exist on type 'readonly string[]'
+
+  // Trying to reassign an index:
+  accept[0] = "text/plain";
+  // Error: Index signature in type 'readonly string[]' only permits reading.
+}
+```
+
+---
+
+### Comparison: What is blocked vs allowed?
+
+| Action | Normal `headers: Record<string, string[]>` | With `readonly headers: Readonly<Record<string, HeaderValue>>` |
+| :--- | :--- | :--- |
+| Read headers: `const h = req.headers["Accept"]` | Allowed | Allowed |
+| Reassign whole map: `req.headers = {}` | Allowed (Mutable bug!) | **TypeScript Error** |
+| Add new header: `req.headers["X-Foo"] = "Bar"` | Allowed (Mutable bug!) | **TypeScript Error** |
+| Overwrite key: `req.headers["Accept"] = "all"` | Allowed (Mutable bug!) | **TypeScript Error** |
+| Mutate array: `req.headers["Accept"].push(...)` | Allowed (Mutable bug!) | **TypeScript Error** |
+
+This guarantees **complete end-to-end immutability** for the constructed [`HttpRequest`](file:///Users/prakharsachan/Developer/DesignPattern/02_Builder_Exercise/ts/src/index.ts#L35-L60).
+
+---
+
+## Concept 4 — `Object.freeze(this)` in the Constructor
+
+`Object.freeze(this)` is there to enforce **runtime immutability** because TypeScript's **`readonly` only exists at compile-time**.
+
+---
+
+### The Fundamental Problem: `readonly` Vanishes at Runtime
+
+TypeScript is purely a development-time tool. When your code runs in Node.js (especially with `--experimental-strip-types`), **all `readonly` keywords are completely deleted**:
+
+```ts
+// What you write in TypeScript:
+export class HttpRequest {
+  readonly url: string;
+}
+
+// What Node.js actually executes at runtime:
+class HttpRequest {
+  url; // Just a plain, mutable JavaScript property!
+}
+```
+
+---
+
+### What Happens WITHOUT `Object.freeze(this)`
+
+If you omit `Object.freeze(this)`:
+
+#### 1. Plain JavaScript code can mutate the request:
+If your TypeScript library is used by someone writing JavaScript, TypeScript's `readonly` does nothing to stop them:
+```js
+// In JavaScript (or JS consumer):
+const req = new DefaultHttpRequestBuilder().url("https://safe.com").build();
+
+// Without Object.freeze, this succeeds silently at runtime!
+req.url = "https://malicious-phishing-site.com"; 
+```
+
+#### 2. Anyone using `(req as any)` can mutate the request:
+Even in TypeScript, an accidental or intentional type assertion completely bypasses `readonly`:
+```ts
+const req = new DefaultHttpRequestBuilder().url("https://safe.com").build();
+
+// Without Object.freeze, this mutates the object in memory:
+(req as any).url = "https://hacked.com";
+(req as any).extraProperty = "injected";
+```
+
+---
+
+### What Happens WITH `Object.freeze(this)`
+
+When you add `Object.freeze(this)` at the end of the constructor, JavaScript's runtime engine locks the memory representation of that specific object:
+
+```ts
+const req = new DefaultHttpRequestBuilder().url("https://safe.com").build();
+
+// At RUNTIME, JavaScript will now throw an error:
+(req as any).url = "https://hacked.com";
+// TypeError: Cannot assign to read only property 'url' of object '#<HttpRequest>'
+
+(req as any).newField = 123;
+// TypeError: Cannot add property newField, object is not extensible
+
+delete (req as any).url;
+// TypeError: Cannot delete property 'url' of #<HttpRequest>
+```
+
+---
+
+### Summary: Defense-in-Depth
+
+By combining both, you satisfy the exercise requirement:
+> *"The resulting HttpRequest should be immutable — no setters after construction."*
+
+| Feature | When It Protects You | How It Protects You |
+| :--- | :--- | :--- |
+| **`readonly`** | **Compile Time** (in IDE / `tsc`) | Red squiggly lines; prevents code from compiling if modified. |
+| **`Object.freeze(this)`** | **Runtime** (in Node.js / browser) | Throws `TypeError`; prevents JavaScript from modifying the object in memory even if someone bypasses types. |
+
+---
+
+## Concept 5 — `(typeof Method)[keyof typeof Method]` — Lookup Types
+
+In plain English, this line extracts **all the values** of the `Method` object and turns them into a **TypeScript union type**:
+
+```ts
+// The result of this line:
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+```
+
+This is one of the most famous patterns in TypeScript, known as the **"Const-to-Union"** pattern.
+
+---
+
+### Step-by-Step Breakdown
+
+Let's break down the expression: `(typeof Method)[keyof typeof Method]`
+
+#### Step 1: The `as const` Object
+```ts
+export const Method = {
+  GET: "GET",
+  POST: "POST",
+  PUT: "PUT",
+  PATCH: "PATCH",
+  DELETE: "DELETE",
+} as const;
+```
+Because of `as const`, TypeScript does **not** see `{ GET: string, POST: string }`. It locks each value down to its exact string literal:
+```ts
+// What TypeScript sees internally for the Method object:
+{
+  readonly GET: "GET";
+  readonly POST: "POST";
+  readonly PUT: "PUT";
+  readonly PATCH: "PATCH";
+  readonly DELETE: "DELETE";
+}
+```
+
+---
+
+#### Step 2: `typeof Method`
+In TypeScript, `typeof` (when used in a type position) extracts the **type shape** of a JavaScript variable:
+
+```ts
+type MethodType = typeof Method;
+// Result:
+// {
+//   readonly GET: "GET";
+//   readonly POST: "POST";
+//   readonly PUT: "PUT";
+//   ...
+// }
+```
+
+---
+
+#### Step 3: `keyof typeof Method`
+`keyof` extracts a union of all the **property names (keys)**:
+
+```ts
+type MethodKeys = keyof typeof Method;
+// Result:
+// "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+```
+
+---
+
+#### Step 4: The Indexed Access `(Type)[Keys]`
+Just like in JavaScript where `obj[key]` looks up a value by its key, in TypeScript:
+```ts
+Type[Key]
+```
+looks up the **type of the value** at that key.
+
+When you pass a **union of keys**, TypeScript looks up every single key and combines the results into a union:
+
+```ts
+(typeof Method)[keyof typeof Method]
+
+// Replaced with what we found in steps 2 & 3:
+// MethodType["GET" | "POST" | "PUT" | "PATCH" | "DELETE"]
+
+// TypeScript evaluates this as:
+// MethodType["GET"] | MethodType["POST"] | MethodType["PUT"] | ...
+
+// Which becomes:
+// "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
+```
+
+---
+
+### Why Do TypeScript Developers Use This Pattern?
+
+#### 1. Single Source of Truth
+Instead of maintaining both an object and a type manually:
+```ts
+// Annoying: if you add a method, you must update two places:
+const Method = { GET: "GET", ... };
+type Method = "GET" | "POST" | "PUT" | ...;
+```
+
+With this pattern, the type is **automatically derived**. If you add `HEAD: "HEAD"` to the object, the type updates instantly!
+
+#### 2. You get BOTH a runtime value AND a type with the same name
+In TypeScript, types and variables live in different "namespaces":
+```ts
+// As a runtime value:
+const myMethod = Method.POST; // dot-access with autocomplete!
+
+// As a compile-time type:
+function sendRequest(m: Method) { ... }
+sendRequest("GET");         // OK
+sendRequest("FOOBAR");      // Compile error!
+```
+
+#### 3. It replaces TypeScript `enum` without the drawbacks
+TypeScript's native `enum` creates weird JavaScript IIFE code and is **not supported** by Node 22's `--experimental-strip-types`. 
+
+This `as const` + `typeof` pattern gives you all the benefits of an enum while remaining 100% clean, native JavaScript at runtime.
+
+---
+
+## Concept 6 — What `keyof typeof Method` Actually Extracts
+
+It extracts the **VALUES**, not the keys!
+
+Because in your code both the keys and values are named `"GET"` (`GET: "GET"`), it is easy to confuse them. 
+
+Let’s look at an example where keys and values are **completely different**:
+
+```ts
+const HttpStatus = {
+  Ok: 200,
+  NotFound: 404,
+  InternalError: 500,
+} as const;
+```
+
+Here:
+- The **KEYS** are: `"Ok" | "NotFound" | "InternalError"`
+- The **VALUES** are: `200 | 404 | 500`
+
+---
+
+### What does each part do?
+
+#### 1. If you want the KEYS:
+You just use `keyof`:
+```ts
+type Keys = keyof typeof HttpStatus;
+// Result: "Ok" | "NotFound" | "InternalError"   <-- The KEYS
+```
+
+#### 2. If you want the VALUES:
+You use `(typeof HttpStatus)[keyof typeof HttpStatus]`:
+```ts
+type Values = (typeof HttpStatus)[keyof typeof HttpStatus];
+// Result: 200 | 404 | 500                      <-- The VALUES!
+```
+
+---
+
+### Why is it written with `()[ ]`?
+
+Think of how JavaScript works at runtime:
+
+In JavaScript, how do you access a property value from an object using a variable? **Square brackets!**
+
+```js
+const person = { name: "Alice", age: 30 };
+
+// You do this:
+const val = person["name"]; // returns "Alice" (the value)
+```
+
+TypeScript has the **exact same feature for types** called an **Indexed Access Type**:
+
+$$\text&#123;ObjectType&#125;[\text&#123;KeyType&#125;]$$
+
+#### Breaking down `(typeof Method)[ ... ]`:
+
+1. **`typeof Method`** gives you the **Object Type**:
+   ```ts
+   {
+     readonly GET: "GET";
+     readonly POST: "POST";
+     readonly PUT: "PUT";
+   }
+   ```
+2. The parentheses `( )` are just grouping, so TypeScript knows you want to index into `typeof Method`.
+3. The brackets `[ ]` mean: **"Look up the value type at this key"**.
+
+---
+
+### The Magic: Passing a union of all keys into `[ ]`
+
+If you write a single key inside `[ ]`:
+```ts
+type JustGet = (typeof Method)["GET"];
+// Looks up the value at key "GET" -> returns "GET"
+```
+
+If you write two keys inside `[ ]`:
+```ts
+type GetOrPost = (typeof Method)["GET" | "POST"];
+// Looks up the values at "GET" and "POST" -> returns "GET" | "POST"
+```
+
+What if you want **ALL** keys?
+Instead of typing every key manually, you write `keyof typeof Method` (which automatically generates `"GET" | "POST" | "PUT" | ...`):
+
+```ts
+type Method = (typeof Method)[  keyof typeof Method  ];
+//                            ▲
+//                            └─ This feeds in ALL keys: "GET" | "POST" | "PUT" | ...
+```
+
+TypeScript substitutes it like this:
+
+```
+(typeof Method)[ "GET" | "POST" | "PUT" | "PATCH" | "DELETE" ]
+       │            │        │
+       ▼            ▼        ▼
+     look up values for each key:
+  
+  "GET" | "POST" | "PUT" | "PATCH" | "DELETE"  (the VALUES!)
+```
+
+### Summary
+- `keyof typeof Obj` $\rightarrow$ gives you the **KEYS**.
+- `(typeof Obj)[keyof typeof Obj]` $\rightarrow$ uses the brackets `[ ]` to look up and give you the **VALUES**.
+
+---
+
+## Concept 7 — `interface` vs `type` — When to Use Which
+
+It is completely normal to be confused because for **basic objects**, they look almost identical:
+
+```ts
+// These two do almost the exact same thing:
+interface User {
+  name: string;
+  age: number;
+}
+
+type User = {
+  name: string;
+  age: number;
+};
+```
+
+However, they have fundamentally different purposes. Here is the simple rule of thumb:
+
+---
+
+### The Golden Rule
+
+> **Use `interface` for Object Shapes & Class Contracts.**  
+> **Use `type` for Unions, Primitives, and Complex Type Computations.**
+
+---
+
+### 1. When you MUST use `type` (`interface` cannot do these)
+
+#### A. Unions (The `|` operator)
+An `interface` **cannot** define a union of types:
+```ts
+// ONLY 'type' can do this:
+type Status = "idle" | "loading" | "success" | "error";
+type ID = string | number;
+type Method = (typeof Method)[keyof typeof Method]; // 👈 What we just wrote!
+```
+
+#### B. Tuples
+```ts
+// ONLY 'type' can do this:
+type Point = [number, number];
+type KeyValuePair = [string, string];
+```
+
+#### C. Primitive Aliases
+```ts
+// ONLY 'type' can do this:
+type Milliseconds = number;
+type Email = string;
+```
+
+#### D. Function Types (shorthand)
+```ts
+// Much cleaner with 'type':
+type OnSuccess = (data: Response) => void;
+```
+
+---
+
+### 2. When you SHOULD use `interface`
+
+#### A. Class Contracts (`implements`)
+When you are designing object-oriented code (like our Builder pattern), an `interface` represents a **contract** that a class must satisfy:
+
+```ts
+export interface HttpRequestBuilder {
+  method(action: Method): this;
+  url(url: string): this;
+  build(): HttpRequest;
+}
+
+// A class implements the contract:
+export class DefaultHttpRequestBuilder implements HttpRequestBuilder {
+  // ...
+}
+```
+
+#### B. Clean Extension (`extends`)
+`interface` uses standard object-oriented inheritance (`extends`), which gives clearer compiler error messages and faster type-checking performance:
+
+```ts
+interface Animal {
+  name: string;
+}
+
+interface Dog extends Animal {
+  breed: string;
+}
+```
+
+*(With `type`, you have to use the intersection operator `&`: `type Dog = Animal & { breed: string };`)*
+
+#### C. Declaration Merging (Augmenting third-party libraries)
+If you declare an `interface` with the same name twice, TypeScript **merges them together**. This is useful for plugins or adding properties to the global `window` object:
+
+```ts
+interface Window {
+  myAnalytics: Analytics; // Adds to the existing browser Window interface!
+}
+```
+*(If you try this with `type`, TypeScript will throw an error: `Duplicate identifier 'Window'`)*
+
+---
+
+### Cheatsheet: What to pick in our Builder Exercise
+
+Look at how we used both in our project:
+
+| What we needed | What we picked | Why |
+| :--- | :--- | :--- |
+| **`Method`** | `type Method = "GET" \| "POST" \| ...` | It's a **union** of strings $\rightarrow$ MUST be `type`. |
+| **`HeaderValue`** | `type HeaderValue = string \| readonly string[]` | It's a **union** ($\rightarrow$ MUST be `type`). |
+| **`HttpRequestOptions`** | `interface HttpRequestOptions { ... }` | It's an **object shape** with properties $\rightarrow$ `interface`. |
+| **`HttpRequestBuilder`** | `interface HttpRequestBuilder { ... }` | It's a **contract** for builder classes to implement $\rightarrow$ `interface`. |
+
+---
+
+## Concept 8 — Tuple Types: `type HeadersEntries = [string, HeaderValue][]`
+
+In plain English, **`HeadersEntries`** represents an **array of `[key, value]` pairs**.
+
+Here is what that looks like in actual code:
+
+```ts
+const myHeaders: HeadersEntries = [
+  ["Content-Type", "application/json"],
+  ["Authorization", "Bearer token_123"],
+  ["Accept", ["text/html", "application/json"]],
+];
+```
+
+---
+
+### Breaking Down the Syntax
+
+```
+type HeadersEntries = [string, HeaderValue] [ ];
+                      └───────────────────┘ └─┘
+                                ▲            ▲
+                                │            │
+                                │            └─ 2. Array of them
+                                └─ 1. A 2-item Tuple (Key & Value)
+```
+
+1. **`[string, HeaderValue]` is a Tuple:**
+   - A tuple is a fixed-length array where each position has a specific type.
+   - Index `0`: must be a `string` (the header name, e.g., `"Content-Type"`).
+   - Index `1`: must be a `HeaderValue` (the header value, e.g., `"application/json"`).
+
+2. **The `[]` at the end means "Array of":**
+   - Just like `number[]` means "an array of numbers", `[string, HeaderValue][]` means **"an array of `[key, value]` tuples"**.
+
+---
+
+### Where does the name "Entries" come from?
+
+In JavaScript, a `[key, value]` pair is officially called an **entry**. 
+
+You see this in standard JavaScript APIs:
+```js
+const obj = { a: "1", b: "2" };
+
+// Object.entries() turns an object into an array of [key, value] pairs:
+Object.entries(obj);
+// Result: [ ["a", "1"], ["b", "2"] ]
+```
+
+And in the browser's standard **Fetch API**:
+```js
+// The native Fetch API allows passing entries:
+const headers = new Headers([
+  ["Content-Type", "application/json"],
+  ["Accept", "text/plain"]
+]);
+```
+
+---
+
+### Why use `HeadersEntries` instead of just a regular object (`HeadersRecord`)?
+
+A regular JavaScript object **cannot have duplicate keys**:
+```ts
+// In a JavaScript object, the second "Set-Cookie" overwrites the first:
+const headers = {
+  "Set-Cookie": "sessionId=123",
+  "Set-Cookie": "theme=dark", // Overwrites sessionId!
+};
+```
+
+With **`HeadersEntries`**, you can easily send multiple headers with the same name:
+```ts
+// Perfect for real HTTP! Both are preserved:
+const headers: HeadersEntries = [
+  ["Set-Cookie", "sessionId=123"],
+  ["Set-Cookie", "theme=dark"],
+];
+```
+
+---
+
+## Concept 9 — `<T extends Documentv2>` — Generic Constraints in Factory Method
+
+Here is the breakdown of what `<T extends Documentv2>` does in both places, and why the function call works the way it does.
+
+---
+
+### 1. What `<T extends Documentv2>` Means
+
+`T` is a generic placeholder, and `extends Documentv2` is a **generic constraint (a strict rule)**.
+
+It tells TypeScript:  
+> *"Whatever type `T` is, it **must** have the shape of `Documentv2` (it must have `open()`, `edit()`, and `save()` methods)."*
+
+#### A. In the Interface:
+```ts
+interface Creator<T extends Documentv2> {
+  create(): T;
+}
+```
+* This defines a blueprint for any factory object.
+* It says: *"A `Creator` must have a method called `create()` that returns a specific document type `T` (like `WordDocument` or `PdfDocument`). You are NOT allowed to make a `Creator<number>` or `Creator<string>` because those don't satisfy `Documentv2`."*
+
+#### B. In the Function:
+```ts
+function runEditor<T extends Documentv2>(creator: Creator<T>): void {
+  const doc = creator.create(); // TS knows `doc` has type T
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+```
+* `runEditor` accepts any `creator` whose output `T` satisfies `Documentv2`.
+* Because of `extends Documentv2`, inside the function body TypeScript guarantees that `doc.open()`, `doc.edit()`, and `doc.save()` safely exist on `doc`. If you tried to call `doc.delete()`, TypeScript would catch the error at compile-time.
+
+---
+
+### 2. Why We Call It Like This:
+
+```ts
+runEditor({ create: () => new WordDocument() });
+```
+
+Let's dissect this call piece by piece:
+
+#### 1. Why pass an object `{ create: ... }`?
+Look at what `runEditor` expects:
+```ts
+function runEditor<T>(creator: Creator<T>)
+```
+The parameter `creator` must satisfy `interface Creator`:
+```ts
+interface Creator<T> {
+  create(): T;
+}
+```
+In TypeScript, you don't need to write `class MyCreator implements Creator`. Thanks to **Structural Typing (duck typing)**, any plain JavaScript object that has a `create()` method automatically satisfies `Creator<T>`!
+
+So `{ create: ... }` is simply creating an object matching the interface on the fly.
+
+#### 2. Why `() => new WordDocument()`?
+`create` needs to be a function that returns a document.
+* `() => new WordDocument()` is an arrow function that creates and returns a `WordDocument` whenever it is called.
+
+#### 3. Why does `new WordDocument()` work even though it extends `Document` instead of `Documentv2`?
+In TypeScript, types are matched by **shape (structure)**, not by their class name:
+* `Documentv2` requires: `{ open(): void, edit(): void, save(): void }`
+* `WordDocument` has: `{ open(): void, edit(): void, save(): void }`
+
+Because `WordDocument` has the exact same methods, TypeScript says: *"The shapes match! `WordDocument` satisfies `Documentv2`."*
+
+---
+
+### 3. Comparison Across All 3 Languages You Wrote Today
+
+Look at how you expressed the exact same functional factory method across Rust, C++, and TypeScript:
+
+| Language | How you call it | Mechanism |
+| :--- | :--- | :--- |
+| **Rust** | `run_editor(\|\| WordDocument)` | Closure `\|\|` + Trait bound `<D: Document>` |
+| **C++** | `runEditor([] { return std::make_unique<PdfDocument>(); })` | Lambda `[]` + `std::function` |
+| **TypeScript** | `runEditor({ create: () => new WordDocument() })` | Arrow function in object + `<T extends Documentv2>` |
+
+---
+
+## Concept 10 — TypeScript Enums vs Rust Enums
+
+**No, it does NOT create the same difference in TypeScript/JavaScript.** 
+
+While the high-level architectural tradeoff (the *Expression Problem*) is somewhat similar, **none of the performance, memory, or low-level dispatch benefits from Rust exist in TypeScript**. 
+
+Furthermore, TypeScript `enum` introduces unique problems that actually caused the crash you just saw in your terminal:
+```console
+SyntaxError [ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX]: TypeScript enum is not supported in strip-only mode
+```
+
+---
+
+### Why It’s Different in TypeScript vs Rust
+
+| Dimension | Rust (`enum`) | TypeScript (`enum` or union) |
+| :--- | :--- | :--- |
+| **Memory Allocation** | **Stack vs Heap**: Eliminates `Box` entirely; zero heap allocations. | **Everything is on the Heap**: V8 allocates all objects (`new Button()`, closures, etc.) on the heap regardless. |
+| **Dispatch / Speed** | **Static vs Dynamic**: Avoids vtable indirection and fat pointers; can be inlined by LLVM. | **Always Dynamic**: V8 executes all property and method lookups dynamically via hidden classes (Shapes) and inline caching. |
+| **Runtime Presence** | Rust enums are first-class native constructs with 0-byte or 1-byte discriminants. | TypeScript enums are a **legacy feature** that generates runtime JavaScript code (IIFE objects). |
+
+---
+
+### 1. The Big TypeScript Gotcha: Why Node 22 Crashed
+
+In your terminal:
+```bash
+node --watch --experimental-strip-types src/index.ts
+```
+Node 22’s `--experimental-strip-types` works by **stripping type annotations** and executing pure JavaScript. 
+
+* `interface`, `type`, and `: void` are erased to empty space.
+* But TypeScript `enum` is **not a pure type**—it compiles into runtime JavaScript code:
+  ```js
+  var Os;
+  (function (Os) {
+      Os[Os["Windows"] = 0] = "Windows";
+      Os[Os["Mac"] = 1] = "Mac";
+  })(Os || (Os = {}));
+  ```
+Because Node's type stripper cannot transform code (it only erases types), it throws `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`.
+
+#### The Modern TypeScript Solution: String Union Types
+In modern T
+&lt;truncated 264 bytes>
+ implemented Approach 2 in TypeScript?
+
+If you wrote Approach 2 in TypeScript like this:
+```typescript
+type Os = "windows" | "mac";
+
+class Button {
+  constructor(private os: Os) {}
+  paint() {
+    if (this.os === "windows") console.log("Windows Button");
+    else console.log("Mac Button");
+  }
+}
+```
+
+Does this give you any advantages over Approach 1 (Interfaces + Classes)?
+* **No memory savings**: `new Button("windows")` still allocates an object on the V8 heap.
+* **No performance boost**: In V8, calling polymorphic methods on classes (`button.paint()`) is heavily optimized by monomorphic Inline Caches (IC) and is often just as fast (or even faster) than `switch` / `if` statements.
+
+---
+
+### Where the Similarity DOES Exist: The Expression Problem
+
+The only similarity between Rust and TypeScript is **code organization**:
+
+1. **Approach 1 (Interfaces + Classes)**:
+   * **Easy to add a new OS**: You create `LinuxButton`, `LinuxCheckBox`, and `LinuxFactory` in a separate file without modifying existing code.
+   * **Hard to add a new Product**: Adding `createScrollBar` requires editing `GuiFactory` and breaking all factory classes.
+
+2. **Approach 2 (Single Class + `switch (this.os)`)**:
+   * **Hard to add a new OS**: You have to find every `if (os === ...)` or `switch` across `Button`, `CheckBox`, etc., and update them.
+   * **Easy to add a new Product**: Just write `class ScrollBar { ... }` without touching existing products.
+
+---
+
+### Summary & Next Step for your TS code
+
+1. **Remove `enum Os`** from [src/index.ts](file:///Users/prakharsachan/Developer/DesignPattern/01_Abstract_Factory/ts/src/index.ts#L1-L4) (or replace it with `type Os = "windows" | "mac"` if you want to type the `os` variable). It isn't used anywhere in your classes and is what causes the Node 22 runtime crash.
+2. *(Small bug in line 62)*: In `MacFactory`, `createCheckBox()` currently has `: Button` as the return type instead of `: CheckBox`:
+   ```typescript
+   // Line 62:
+   createCheckBox(): CheckBox {
+     return new MacCheckBox();
+   }
+   ```

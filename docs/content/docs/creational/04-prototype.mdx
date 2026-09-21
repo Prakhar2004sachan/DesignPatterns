@@ -1,0 +1,188 @@
+---
+title: 04. Prototype Pattern
+description: Create new objects by cloning existing prototypes, exploring object-safety in Rust, polymorphic cloning in C++, and structured cloning in TS/JS.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## 1. Intent & Mental Model
+
+The **Prototype Pattern** lets you create new objects by **cloning existing ones** (the prototypes) rather than instantiating them from scratch with a constructor. The prototype itself acts as the factory.
+
+> **Beginner's Intuition:** Imagine you are making a video game and you need to spawn 500 "Orc" enemies. Instead of calling `new Orc(health, speed, damage, weapon)` 500 times and potentially reading from a database for each one to find out what weapon an Orc has, you create one "Master Orc" at the start of the game. Then, every time you need a new Orc, you just create a clone of the "Master Orc" and slightly tweak its properties (like its spawn position). This is significantly faster and easier to manage.
+
+<PatternDiagram chart={`
+graph LR
+    Registry["Prototype Registry / Cache"] -->|"clone()"| P1["Warrior (Copied & Spawned)"]
+    Registry -->|"clone()"| P2["Mage (Copied & Spawned)"]
+`} />
+
+---
+
+## 2. Multi-Language Rosetta Stone
+
+Here is how the Prototype pattern looks across different languages. Since the primary action is "cloning", the implementation depends heavily on the memory and object models of the specific language.
+
+<Tabs items={['Rust (Boxed Clone)', 'C++20 (Virtual Clone)', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust (Boxed Clone)">
+    In Rust, we often want to clone objects stored as dynamic traits (`Box<dyn Prototype>`). However, the built-in `Clone` trait cannot be used directly with `dyn` traits because `Clone` returns a stack-allocated object (`Self`), and Rust needs to know its exact size at compile time. We solve this by adding a custom `clone_box` method.
+
+```rust
+// Product trait defines the interface for all prototypes
+pub trait Prototype {
+    fn clone_box(&self) -> Box<dyn Prototype>;
+    fn display(&self);
+}
+
+// Concrete Prototype (e.g., a Monster we want to clone)
+#[derive(Clone)]
+pub struct Monster {
+    pub name: String,
+    pub health: u32,
+}
+
+// Implementing our custom Prototype trait for Monster
+impl Prototype for Monster {
+    fn clone_box(&self) -> Box<dyn Prototype> {
+        // We use the built-in #[derive(Clone)] to copy the data,
+        // and then we wrap it in a new Box.
+        Box::new(self.clone())
+    }
+
+    fn display(&self) {
+        println!("Monster: {}, Health: {}", self.name, self.health);
+    }
+}
+
+// Registry to store our prototypes for easy cloning later
+pub struct MonsterRegistry {
+    prototypes: std::collections::HashMap<String, Box<dyn Prototype>>,
+}
+
+impl MonsterRegistry {
+    pub fn new() -> Self {
+        MonsterRegistry { prototypes: std::collections::HashMap::new() }
+    }
+
+    pub fn register(&mut self, key: &str, proto: Box<dyn Prototype>) {
+        self.prototypes.insert(key.to_string(), proto);
+    }
+
+    pub fn spawn(&self, key: &str) -> Option<Box<dyn Prototype>> {
+        self.prototypes.get(key).map(|p| p.clone_box())
+    }
+}
+```
+  </Tab>
+
+  <Tab value="C++20 (Virtual Clone)">
+    In C++, we face a similar issue to Rust. When dealing with polymorphic base classes (e.g., a pointer to a `Monster`), the copy constructor doesn't work correctly because it doesn't know the exact derived class (like `Orc` or `Goblin`). We solve this using the **Virtual Clone Idiom**.
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
+// Base Product class
+class Monster {
+public:
+    virtual ~Monster() = default;
+    
+    // The virtual clone method allows derived classes to return a copy of themselves
+    virtual std::unique_ptr<Monster> clone() const = 0;
+    virtual void display() const = 0;
+};
+
+// Concrete Product class
+class Orc : public Monster {
+private:
+    std::string weapon;
+    int health;
+public:
+    Orc(std::string w, int h) : weapon(std::move(w)), health(h) {}
+
+    // Virtual clone idiom:
+    // We use the copy constructor (*this) to create a copy,
+    // and then wrap it in a unique_ptr.
+    std::unique_ptr<Monster> clone() const override {
+        return std::make_unique<Orc>(*this);
+    }
+
+    void display() const override {
+        std::cout << "Orc with " << weapon << " (HP: " << health << ")\n";
+    }
+};
+```
+  </Tab>
+
+  <Tab value="TypeScript">
+    In TypeScript, you can define an interface requiring a `clone()` method. However, modern JavaScript engines provide built-in tools for cloning objects, so you might not even need a formal class.
+
+```typescript
+// Traditional OOP Interface approach
+interface Prototype<T> {
+  clone(): T;
+}
+
+class GraphicObject implements Prototype<GraphicObject> {
+  constructor(public x: number, public y: number, public color: string) {}
+
+  clone(): GraphicObject {
+    return new GraphicObject(this.x, this.y, this.color);
+  }
+}
+
+// In modern TypeScript and JavaScript, structuredClone() is highly recommended.
+// It performs a deep copy of plain objects, handling arrays and nested objects correctly.
+const configTemplate = { x: 10, y: 20, colors: ["red", "blue"] };
+const clonedConfig = structuredClone(configTemplate);
+```
+  </Tab>
+
+  <Tab value="JavaScript">
+    JavaScript natively supports prototypal inheritance, making the Prototype pattern naturally align with the language's core design. You can use `Object.create()` to create a new object that inherits from an existing object.
+
+```javascript
+// A prototype object containing behavior and default state
+const warriorPrototype = {
+  type: "Warrior",
+  attack() { 
+      console.log(`${this.name} attacks!`); 
+  },
+  
+  // Clone method delegates to Object.create
+  clone(name) {
+    // Creates a new empty object whose prototype is 'warriorPrototype'
+    const copy = Object.create(this);
+    // Add instance-specific properties
+    copy.name = name;
+    return copy;
+  }
+};
+
+// We don't use 'new', we just ask the prototype to clone itself
+const bob = warriorPrototype.clone("Bob");
+bob.attack(); // "Bob attacks!"
+```
+  </Tab>
+</Tabs>
+
+---
+
+## 3. Language Nuances & Gotchas
+
+<Callout type="warn" title="Rust: Why 'trait Prototype: Clone' Fails">
+As a beginner in Rust, your first instinct might be to require the standard `Clone` trait: `trait Prototype: Clone`. However, if you try to use this trait as a dynamic object (e.g., `Box<dyn Prototype>`), the compiler will throw an error. 
+
+This happens because the standard `Clone` trait requires `Self: Sized` (it returns the object directly on the stack). But a `dyn Prototype` could be any struct, meaning its size is unknown at compile time.
+**The Fix:** You must define a custom method like `fn clone_box(&self) -> Box<dyn Prototype>` on your trait. This returns a heap-allocated `Box`, which has a known size (it's just a pointer).
+</Callout>
+
+<Callout type="warn" title="JS/TS: Shallow vs Deep Clone Traps">
+Be very careful when cloning objects in JavaScript and TypeScript. Using `Object.assign()` or the spread operator (`{ ...obj }`) only creates a **shallow clone**. 
+
+If your prototype contains nested objects or arrays, the shallow clone will just copy the references to those inner objects. This means if you modify a nested array in the cloned object, you will accidentally modify the original prototype as well! 
+**The Fix:** Always use `structuredClone(obj)` or implement an explicit deep cloning method to safely copy nested data structures.
+</Callout>

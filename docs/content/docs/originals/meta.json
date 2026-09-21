@@ -1,0 +1,10 @@
+{
+  "title": "Originals (Source Material)",
+  "pages": [
+    "index",
+    "01-abstract-factory",
+    "02-builder",
+    "03-factory-method",
+    "04-prototype"
+  ]
+}

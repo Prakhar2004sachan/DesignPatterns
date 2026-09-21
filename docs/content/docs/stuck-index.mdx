@@ -1,0 +1,336 @@
+---
+title: Where I Got Stuck — Master Index
+description: Every real compiler error, runtime crash, and architectural trap I hit across Rust, C++, TypeScript, and JavaScript while implementing design patterns — language by language.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+> **Note for Beginners**: These are **real blockers and compiler errors** encountered while implementing the patterns. This section serves as a practical troubleshooting guide. We dive deep into the language-specific limitations rather than just textbook definitions. Each entry links to the detailed rough-notes page where the full explanation lives.
+
+---
+
+## Rust
+
+<Callout type="info">
+Full detail: [Rust Problems](/docs/rough-notes/rust/problems) · [Rust Concepts](/docs/rough-notes/rust/concepts) · [Rust Gotchas](/docs/rough-notes/rust/gotchas)
+</Callout>
+
+<Accordions>
+<Accordion title="Problem 1 — Trait Object Safety: trait Prototype: Clone fails with dyn">
+
+**Pattern**: Abstract Factory / Prototype
+
+```
+error[E0038]: the trait `Prototype` cannot be made into an object
+  --> src/main.rs:5:21
+   |
+1  | trait Prototype: Clone {
+   |                  ----- the trait cannot be made into an object
+   |                  because it requires `Self: Sized` for `clone`
+```
+
+**Why**: `Clone::clone` returns `Self` by value. Rust requires all methods on a dyn-safe trait to not return `Self` by value — because the concrete type is unknown behind `dyn Trait`.
+
+**Fix**:
+```rust
+fn clone_box(&self) -> Box<dyn Prototype>;
+```
+`Box<T>` is always pointer-sized, so the return type is fixed.
+</Accordion>
+
+<Accordion title="Problem 2 — I built Dependency Injection, not Factory Method">
+
+**Pattern**: Factory Method
+
+My first attempt:
+```rust
+let editor = Editor::new(PdfDocument); // Error: DI — main() creates the product
+```
+
+In **Factory Method**, the **Creator** creates the product internally via a factory method. The client only picks which Creator:
+```rust
+// Correct: Factory Method:
+let editor = PdfEditor;  // client picks the creator
+editor.run();            // run() calls self.create_document() internally
+```
+
+**Key distinction**: Who creates the product? Caller → DI. Creator itself → FM.
+</Accordion>
+
+<Accordion title="Problem 3 — impl GuiFactory for GuiFactory: struct vs trait">
+
+**Pattern**: Abstract Factory
+
+I confused a struct with a trait and wrote `impl GuiFactory for GuiFactory`. In Rust:
+- `impl SomeTrait for SomeType` → implementing a **trait** on a **type**
+- `impl SomeType { ... }` → inherent impl on a struct
+
+When using an enum-based factory, you don't need a trait:
+```rust
+impl GuiFactory {
+    fn new(os: Os) -> Self { GuiFactory { os } }
+    fn create_button(&self) -> Button { ... }
+}
+```
+</Accordion>
+
+<Accordion title="Problem 4 — Rust warnings: dead_code on Builder methods">
+
+**Pattern**: Builder
+
+```
+warning: method is never used: 'set_username'
+```
+
+Rust warns about methods defined but never called. During pattern exploration, many builder setters aren't exercised in `main()`.
+
+**Options**:
+1. `#[allow(dead_code)]` above the impl block
+2. Actually call the method
+3. Prefix with `_`: `fn _set_username(...)`
+</Accordion>
+
+<Accordion title="Gotcha — Closures have unique anonymous types: why &lt;F, D&gt; is needed">
+
+Every closure in Rust gets a **unique, anonymous, compiler-generated type**. Even two `|| PdfDocument` closures that look identical have different types.
+
+This forces generic placeholders for any function accepting a closure:
+```rust
+fn run_editor<F, D>(create: F)
+where
+    F: Fn() -> D,
+    D: Document,
+```
+
+Calling `run_editor(|| PdfDocument)` vs `run_editor(PdfDocument)`:
+
+- `|| PdfDocument` — passes a **factory** (closure that creates it)
+- `PdfDocument` — passes the **value** (already-created document)
+
+</Accordion>
+
+<Accordion title="Gotcha — Stack allocation requires known size: dyn Trait without Box fails">
+
+Trait objects are **dynamically sized** (`!Sized`). The compiler cannot allocate a stack slot for them:
+```rust
+let doc: Document = create_doc(); // Error: compiler error
+```
+
+Solutions:
+
+- `Box<dyn Document>` — heap allocates, pointer is fixed size
+- Generic `<D: Document>` — concrete type known at compile time, stack works
+
+</Accordion>
+</Accordions>
+
+---
+
+## C++
+
+<Callout type="info">
+Full detail: [C++ Problems](/docs/rough-notes/cpp/problems) · [C++ Concepts](/docs/rough-notes/cpp/concepts) · [C++ Gotchas](/docs/rough-notes/cpp/gotchas)
+</Callout>
+
+<Accordions>
+<Accordion title="Problem 1 — macOS SDK linker mismatch: arm64e.x1-macos">
+
+```
+ld: tapi error: malformed file
+MacOSX27.0.sdk/.../libSystem.B.tbd: unknown architecture arm64e.x1-macos
+```
+
+**Cause**: Without `-isysroot`, `clang++` symlinks to `MacOSX27.0.sdk` (preview), which has ABI tags the installed linker can't parse.
+
+**Fix** (added to all Makefiles and `create-projects.sh`):
+```makefile
+SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
+SYSROOT_FLAG = $(if $(SDKROOT),-isysroot $(SDKROOT),)
+CXXFLAGS ?= -std=c++20 -Wall -Wextra -O2 $(SYSROOT_FLAG)
+```
+</Accordion>
+
+<Accordion title="Problem 2 — Missing virtual destructor: silent resource leak">
+
+**Pattern**: Factory Method / Abstract Factory
+
+```cpp
+class Document {
+public:
+    ~Document() = default; // Error: NOT virtual
+};
+```
+
+When you `delete` a `WordDocument` through a `Document*`, only `Document::~Document()` is called. `WordDocument::~WordDocument()` is **silently skipped** — no compiler error, no warning by default.
+
+**Fix**:
+```cpp
+virtual ~Document() = default; // Correct: Always on polymorphic base classes
+```
+</Accordion>
+
+<Accordion title="Problem 3 — Covariant return types don't work with unique_ptr">
+
+C++ allows covariant raw pointers (`WordDocument*` overriding `Document*`).  
+But `std::unique_ptr<WordDocument>` and `std::unique_ptr<Document>` are **unrelated template instantiations**.
+
+**Fix**: Override must return `std::unique_ptr<Document>`, use `make_unique<WordDocument>()` inside:
+```cpp
+std::unique_ptr<Document> createDocument() const override {
+    return std::make_unique<WordDocument>(); // implicitly converts
+}
+```
+</Accordion>
+
+<Accordion title="Gotcha — virtual without override: typo goes undetected">
+
+If you write `void opne() override { ... }` (typo), the compiler gives an error — override checked against base.  
+If you write `void opne() { ... }` (no override keyword), it silently creates a **new unrelated method**. The base method is never called.
+
+**Rule**: always write `override` on methods that are supposed to override a base method.
+</Accordion>
+
+<Accordion title="Gotcha — std::function may heap-allocate (SBO limit)">
+
+`std::function` uses **Small Buffer Optimization** — small lambdas (< ~32 bytes) stored inline. Larger captures → heap allocation. That's why passing `std::function` by value is expensive: it copies a potentially heap-allocated object.
+
+**Always** pass `std::function` by `const&` unless you need to own it:
+```cpp
+void runEditor(const std::function<std::unique_ptr<Document>()>& create) { ... }
+```
+</Accordion>
+</Accordions>
+
+---
+
+## TypeScript
+
+<Callout type="info">
+Full detail: [TypeScript Problems](/docs/rough-notes/typescript/problems) · [TypeScript Concepts](/docs/rough-notes/typescript/concepts) · [TypeScript Gotchas](/docs/rough-notes/typescript/gotchas)
+</Callout>
+
+<Accordions>
+<Accordion title="Problem 1 — Builder interface not satisfied: methods missing or mistyped">
+
+**Pattern**: Builder Exercise
+
+The builder had methods that didn't match the spec — wrong names, wrong return types. TypeScript's structural typing catches this at compile time when you assign the builder to a typed interface, but **only** if you actually declare the type somewhere. An untyped `const builder = new HttpRequestBuilder()` silently passes.
+
+**Fix**: explicitly annotate or use `satisfies` to verify shape:
+```typescript
+const builder = new HttpRequestBuilder() satisfies IHttpRequestBuilder;
+```
+</Accordion>
+
+<Accordion title="Problem 2 — Readonly&lt;Record&gt; overload mismatch with Object.keys">
+
+Passing `Readonly<Record<string, HeaderValue>>` to `Object.keys()` can fail the overload resolution:
+```
+No overload matches this call. Argument of type 'Readonly<...>' is not assignable...
+```
+
+**Fix**: cast through the wrapping:
+```typescript
+Object.keys(this.headers as Record<string, HeaderValue>)
+```
+</Accordion>
+
+<Accordion title="Gotcha — Structural typing: object literal satisfies interface without implements">
+
+```typescript
+runEditor({ create: () => new WordDocument() }); // Correct: no class needed
+```
+
+TypeScript checks **shape**, not class name or `implements` keyword. An object literal with matching method signatures satisfies the interface. This is often the most idiomatic pattern in TS/JS.
+</Accordion>
+
+<Accordion title="Gotcha — Phantom typestate branding with &lt;Has extends string = never&gt;">
+
+The Builder typestate pattern uses a phantom generic to track which fields have been set at compile time:
+
+```typescript
+class SafeHttpRequestBuilder<Has extends string = never> {
+  setMethod(): SafeHttpRequestBuilder<Has | "method"> { ... }
+  build(this: SafeHttpRequestBuilder<"method" | "url">): HttpRequest { ... }
+}
+```
+
+Calling `.build()` without `.setMethod()` → compile error. Zero runtime cost.
+</Accordion>
+
+<Accordion title="Gotcha — this as unknown as T: the necessary double cast">
+
+Direct casting `this as SafeHttpRequestBuilder<Has | 'method'>` is rejected because TypeScript can't verify the structural equivalence across generic instantiations.
+
+`this as unknown as T` is the correct escape hatch — `unknown` is assignable to and from anything, bridging the gap while keeping intent explicit.
+</Accordion>
+
+<Accordion title="Gotcha — (typeof Method)[keyof typeof Method]: what it actually extracts">
+
+```typescript
+export const Method = { GET: "GET", POST: "POST" } as const;
+export type Method = (typeof Method)[keyof typeof Method];
+// Result: type Method = "GET" | "POST"
+```
+
+- `typeof Method` → the type of the object: `{ GET: "GET", POST: "POST" }`
+- `keyof typeof Method` → `"GET" | "POST"` (the keys)
+- `(typeof Method)[keyof typeof Method]` → index with those keys → `"GET" | "POST"` (the values)
+
+This is the standard pattern for extracting a string union from a `const` object.
+</Accordion>
+</Accordions>
+
+---
+
+## JavaScript
+
+<Callout type="info">
+Full detail: [JavaScript Problems](/docs/rough-notes/javascript/problems) · [JavaScript Concepts](/docs/rough-notes/javascript/concepts) · [JavaScript Gotchas](/docs/rough-notes/javascript/gotchas)
+</Callout>
+
+<Accordions>
+<Accordion title="Problem 1 — Not throwing in abstract base class → silent undefined">
+
+If a base class method is empty and a subclass forgets to override it, JS silently returns `undefined`. The crash happens **downstream** with a confusing `TypeError: Cannot read properties of undefined`.
+
+**Fix**: always `throw new Error('Abstract: must override createDocument()')` in base class methods. Makes the real failure site obvious.
+</Accordion>
+
+<Accordion title="Problem 2 — Direct instantiation of abstract base classes">
+
+JavaScript has no native `abstract class` keyword:
+```javascript
+class Document {
+  constructor() {
+    if (new.target === Document) {
+      throw new Error("Cannot instantiate abstract class Document directly");
+    }
+  }
+}
+new Document();     // Error: throws immediately — clear error
+new WordDocument(); // Correct: passes — new.target is WordDocument
+```
+
+`new.target` refers to the class that was directly invoked with `new`.
+</Accordion>
+
+<Accordion title="Problem 3 — Object mutation after construction in Builder">
+
+Unlike Rust or TypeScript, JavaScript properties are freely mutable by default. Callers can mutate `request.url` or `request.headers` after building.
+
+**Fix**: Call `Object.freeze(this)` inside the constructor and freeze nested options (`Object.freeze({ ...headers })`).
+</Accordion>
+
+<Accordion title="Gotcha — Method chaining breaks without return this">
+
+Every builder setter method must end with `return this;`:
+```javascript
+setMethod(method) {
+  this.method = method;
+  return this; // ← REQUIRED for .setMethod().setUrl() chaining
+}
+```
+</Accordion>
+</Accordions>

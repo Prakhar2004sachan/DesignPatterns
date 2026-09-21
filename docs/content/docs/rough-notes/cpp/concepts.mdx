@@ -1,0 +1,321 @@
+---
+title: "C++ – Concepts I Learned"
+description: "Core C++ concepts I understood while implementing design patterns."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+---
+
+## Concept 1 — `virtual` Functions, Vtables & Dynamic Dispatch
+
+Here is a clear breakdown of what `virtual` does and how smart pointers differ from raw pointers in C++.
+
+---
+
+### Part 1: What `virtual` Does
+
+In C++, functions by default use **Static Binding (compile-time binding)**. That means the compiler decides which function to call based on the *type of the pointer/reference*, not the actual object it points to.
+
+#### 1. Enabling Runtime Polymorphism (Dynamic Dispatch)
+When you add the `virtual` keyword:
+```cpp
+virtual std::unique_ptr<Document> createDocument() const = 0;
+```
+You tell C++:  
+> *"Do not resolve this function call at compile time. Instead, look up the actual object's type at runtime using a **vtable (virtual table)** and call the derived class's version."*
+
+This is what allows `DocumentEditor::run()`:
+```cpp
+void run() const {
+    auto doc = createDocument(); // Calls PdfEditor's or WordEditor's createDocument()!
+    ...
+}
+```
+Even though `run()` lives in the base class `DocumentEditor`, calling `createDocument()` will dynamically invoke whichever child class actually created the editor.
+
+#### 2. What does `= 0` at the end mean? (**Pure Virtual**)
+Because line 51 ends with `= 0`:
+* It makes `createDocument()` a **pure virtual function**.
+* It means `DocumentEditor` does **not** provide any implementation — every derived class (like `WordEditor` or `PdfEditor`) **is required to implement it**.
+* It turns `DocumentEditor` into an **Abstract Base Class** (like an `interface` in Java/TypeScript or a `trait` in Rust). You cannot do `DocumentEditor editor;` directly.
+
+> [!TIP]
+> **Virtual Destructor**: Notice line 48 has `virtual ~DocumentEditor() = default;`. Always make the destructor `virtual` in base classes. If you delete a derived object through a base pointer (`DocumentEditor*`), a `virtual` destructor ensures the derived class's destructor runs and cleans up properly.
+
+---
+
+### Part 2: Smart Pointers vs. Normal (Raw) Pointers
+
+A **raw pointer** is just a primitive memory address. A **smart pointer** is a C++ template class (`<memory>`) that wraps a raw
+&lt;truncated 136 bytes>
+r Problem:
+```cpp
+// Raw Pointer
+Document* doc = new WordDocument();
+doc->open();
+doc->edit();
+
+// You MUST remember to manually free it:
+delete doc; 
+
+// Problems:
+// 1. Memory Leak: If an exception is thrown before `delete doc;`, memory is leaked forever.
+// 2. Dangling Pointer: If you access `doc` after `delete`, it causes undefined behavior / crash.
+// 3. Double Free: Calling `delete doc;` twice crashes your application.
+```
+
+---
+
+#### 2. The Smart Pointer Solution (`std::unique_ptr`):
+```cpp
+// Smart Pointer
+std::unique_ptr<Document> doc = std::make_unique<WordDocument>();
+doc->open();
+doc->edit();
+
+// NO `delete` needed!
+// When `doc` goes out of scope (at the end of the block/function),
+// it AUTOMATICALLY calls `delete` and frees the memory.
+```
+
+Even if an error or exception occurs, the smart pointer's destructor will guarantee the memory is cleaned up.
+
+---
+
+### Comparison Table
+
+| Feature | Raw Pointer (`T*`) | Smart Pointer (`std::unique_ptr<T>`) |
+| :--- | :--- | :--- |
+| **Cleanup** | **Manual** (Must call `delete`) | **Automatic** (Deletes when out of scope) |
+| **Exception Safety** | Prone to memory leaks on exceptions | 100% Exception safe (RAII) |
+| **Ownership** | Ambiguous (Who owns the memory?) | **Explicit** (Sole owner; cannot be copied, only moved) |
+| **Performance Overhead**| None | **Zero overhead** (Compiles down to the exact same speed and size as a raw pointer) |
+
+---
+
+### Summary of the 3 Standard Smart Pointers in Modern C++
+
+1. **`std::unique_ptr<T>`** *(Used here)*:
+   * **Sole ownership**: Only one pointer can point to this object. Cannot be duplicated/copied, only transferred via `std::move`.
+2. **`std::shared_ptr<T>`**:
+   * **Shared ownership**: Multiple pointers can point to the same object using reference counting. The object is deleted when the last `shared_ptr` pointing to it is destroyed.
+3. **`std::weak_ptr<T>`**:
+   * **Non-owning observer**: Watches a `std::shared_ptr` without incrementing the reference count (prevents circular reference memory leaks).
+
+---
+
+## Concept 2 — Why `virtual` Is Also Required on `Document` Methods
+
+The reason `virtual` is required inside `class Document` comes down to **how it is used in `DocumentEditor::run()`**.
+
+Look at lines 55–58 in your code:
+```cpp
+void run() const {
+    auto doc = createDocument(); // <--- `doc` has type std::unique_ptr<Document>
+    doc->open();
+    doc->edit();
+    doc->save();
+}
+```
+
+Notice that `doc` is a pointer to the **base class** (`Document*`), but at runtime it actually points to a `WordDocument` or `PdfDocument`.
+
+Here are the **3 critical reasons** why `virtual` is needed in `Document`:
+
+---
+
+### 1. Without `virtual`, `doc->open()` would completely ignore `WordDocument`
+
+In C++, if a method is **not** virtual, the compiler decides which function to call based **strictly on the pointer's type at compile time**.
+
+Imagine `Document` did **not** use `virtual`:
+```cpp
+// WITHOUT VIRTUAL:
+class Document {
+    public:
+        void open() const { std::cout << "Generic Document open\n"; }
+};
+
+class WordDocument : public Document {
+    public:
+        void open() const { std::cout << "Word open\n"; }
+};
+```
+Now, if you run this:
+```cpp
+std::unique_ptr<Document> doc = std::make_unique<WordDocument>();
+doc->open();
+```
+* **What you expect:** `"Word open"`
+* **What C++ actually calls:** `"Generic Document open"`!
+
+Because `doc` is typed as `Document*`, without `virtual` the compiler doesn't care that the actual object in memory is a `WordDocument`. It statically binds straight to `Document::open()`.
+
+**By adding `virtual`**, you tell C++: *"When someone calls `doc->open()`, don't just call Document's version. Look up the real object in the vtable and call `WordDocument::open()`."*
+
+---
+
+### 2. Why `= 0` (Pure Virtual)?
+
+What would a generic "Document" actually do if someone called `open()` or `save()` on it?
+
+A generic "Document" is just an abstract idea—it doesn't have a file format, so it has no idea how to parse or save itself.
+By marking it `= 0`:
+1. You say: *"I am an interface. I have no code for this. My subclasses **must** provide the implementation."*
+2. It prevents bugs like `Document d;` (C++ will produce a compiler error if anyone tries to instantiate a raw `Document`).
+
+---
+
+### 3. Why `virtual ~Document() = default;` (The Virtual Destructor)?
+
+This is one of the most famous rules in C++: **If a class has any virtual functions, its destructor MUST be virtual.**
+
+At the end of `run()`:
+```cpp
+void run() const {
+    auto doc = createDocument();
+    doc->open();
+} // <--- `doc` goes out of scope here and calls the destructor!
+```
+
+* **If `~Document()` is NOT virtual:**  
+  C++ only calls `Document::~Document()`. It **skips** `WordDocument::~WordDocument()` completely! If `WordDocument` had opened files, buffers, or allocated memory, **it would leak**.
+* **Because `~Document()` IS virtual:**  
+  C++ uses the vtable to correctly call `WordDocument`'s destructor first, cleaning up all derived resources safely.
+
+---
+
+## Concept 3 — `std::function` & Passing by `const &`
+
+Here is a step-by-step breakdown of how this function works, focusing especially on that parameter signature:
+
+```cpp
+void runEditor(const std::function<std::unique_ptr<Document>()>& create)
+```
+
+---
+
+### 1. Breaking Down `const std::function<std::unique_ptr<Document>()>& create`
+
+Let's peel this apart from the inside out:
+
+| Part | What it means |
+| :--- | :--- |
+| **`std::unique_ptr<Document>()`** | **Function Signature `ReturnType(ArgumentTypes)`**&lt;br>• `()` = Takes **0 arguments**.&lt;br>• `std::unique_ptr<Document>` = Returns a smart pointer to a `Document`. |
+| **`std::function<...>`** | **Universal Callable Wrapper** (from `<functional>`).&lt;br>In C++, a lambda, a function pointer, and a functor (class with `operator()`) all have different types. `std::function` is a wrapper that can hold and execute **any** of them as long as they match the signature `() -> std::unique_ptr<Document>`. |
+| **`&` (Reference)** | **Pass by Reference**.&lt;br>Passes the callable directly without making an expensive copy. |
+| **`const`** | **Read-only**.&lt;br>`runEditor` will only *call* the function, not modify or reassign it. |
+| **`create`** | The parameter name you use to call the function inside the body. |
+
+In plain English:  
+> *"Accept any callable (lambda, function, etc.) by reference that takes **zero arguments** and **returns a `std::unique_ptr<Document>`**."*
+
+---
+
+### 2. How the Inside of the Function Works
+
+```cpp
+void runEditor(const std::function<std::unique_ptr<Document>()>& create) {
+    auto doc = create(); // 1. Invokes the factory lambda!
+    doc->open();         // 2. Calls Document methods
+    doc->edit();
+    doc->save();
+} // 3. `doc` goes out of scope here and automatically deallocates!
+```
+
+1. **`auto doc = create();`**:
+   * It calls whatever function was passed in.
+   * `doc` receives the returned `std::unique_ptr<Document>`.
+2. **`doc->open(); ...`**:
+   * Calls the virtual methods on the document.
+3. **Automatic Cleanup (RAII)**:
+   * When `runEditor` reaches the closing `}`, `doc` goes out of scope and automatically deletes the document from memory.
+
+---
+
+### 3. How It Connects to `main()`
+
+In `main()` you wrote:
+```cpp
+runEditor([] { return std::make_unique<PdfDocument>(); });
+```
+
+* **`[] { ... }`** is a C++ lambda (anonymous function).
+* It takes no parameters `()`.
+* It returns `std::make_unique<PdfDocument>()`.
+* C++ automatically converts this lambda into the `std::function<std::unique_ptr<Document>()>` parameter.
+
+---
+
+### 4. Comparison: Rust vs. C++
+
+Notice how this is the exact same functional Factory Method pattern you wrote in Rust earlier:
+
+| Feature | Rust | C++ |
+| :--- | :--- | :--- |
+| **Call Site** | `run_editor(\|\| PdfDocument);` | `runEditor([] { return std::make_unique<PdfDocument>(); });` |
+| **Parameter** | `create: F` where `F: Fn() -> D` | `const std::function<std::unique_ptr<Document>()>& create` |
+| **Invocation** | `let doc = create();` | `auto doc = create();` |
+
+---
+
+## Concept 4 — Why `&` (Reference) Avoids Copies in `std::function`
+
+You have two great questions here. Let's answer each directly:
+
+---
+
+### 1. "Is `create` the function?"
+
+**Yes, exactly!** 
+
+Just like in a normal function where you write:
+```cpp
+void printAge(int age)
+//            ^^^ ^^^
+//           type  name
+```
+Here:
+* **The Type** is `const std::function<std::unique_ptr<Document>()>&`
+* **The Parameter Name** is `create`
+
+Because `create` is the parameter name representing the function you passed in, you can invoke it with parentheses:
+```cpp
+auto doc = create(); // <--- calls the function!
+```
+
+---
+
+### 2. "Why do we use `&` (pass by reference)?"
+
+To understand why, think of `std::string`:  
+In C++, you almost never write `void print(std::string text)`. Instead, you write `void print(const std::string& text)` to **avoid copying the string**.
+
+The exact same rule applies to `std::function`:
+
+#### Without `&` (Pass by Value):
+```cpp
+void runEditor(std::function<std::unique_ptr<Document>()> create) // Copies!
+```
+* Every time you call `runEditor`, C++ creates a **brand new copy** of the `std::function` object.
+* `std::function` is a heavy object (around 32 to 48 bytes).
+* If your lambda captures variables (like large vectors or objects), copying `std::function` can trigger **heap memory allocations (`malloc`/`new`)**.
+* Making an unnecessary copy just to call it once is pure wasted CPU and memory.
+
+#### With `&` (Pass by Reference):
+```cpp
+void runEditor(const std::function<std::unique_ptr<Document>()>& create) // Fast!
+```
+* **No copying** happens.
+* It simply passes a reference (pointer size: 8 bytes).
+* **Zero heap allocations**.
+* The **`const`** guarantees that `runEditor` will only *call* the function and won't mutate its internal state.
+
+---
+
+### Summary
+
+* `create` is just the **name** of the function parameter.
+* `&` avoids **expensive copies and memory allocations**.
+* `const` guarantees it's **read-only** (you can only execute it).

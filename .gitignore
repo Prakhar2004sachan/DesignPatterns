@@ -7,6 +7,10 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
+.next/
+**/.next/
+.source/
+**/.source/
 
 # Database files
 *.db

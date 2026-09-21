@@ -1,0 +1,315 @@
+---
+title: 02. Builder Pattern
+description: Separate the construction of a complex object from its representation, contrasting standard OOP builders with Rust's compile-time Typestate pattern.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+## 1. Intent & Problem It Solves
+
+The **Builder Pattern** separates the **construction of a complex object** from its representation so that the same construction process can create different representations.
+
+> **Beginner's Intuition:** Imagine you are ordering a custom pizza. Instead of giving the chef a massive, rigid list of 15 ingredients at once (and risking getting them in the wrong order, like cheese before the sauce), you talk to a "Pizza Builder". You say, "add cheese", then "add pepperoni", and finally "bake it". The Builder pattern applies this to code. When an object requires many optional parameters, setting them step-by-step through a builder prevents giant, confusing constructors and ensures the object is only created when it's fully valid.
+
+### The Problem: Telescoping Constructors & Invalid State
+Imagine a Server configuration with 10 options (`host`, `port`, `timeout`, `ssl`, `max_conn`, etc.):
+- In languages without named arguments (C++, Java), you end up with telescoping constructors `Server(host, port)`, `Server(host, port, timeout)`, `Server(host, port, timeout, ssl, ...)`.
+- Calling `new Server("localhost", 8080, 5000, true, 100)` is unreadable and prone to swapping adjacent arguments.
+- Instantiating an empty object and setting properties via setters leaves the object in a half-initialized, invalid state until finished.
+
+---
+
+## 2. The Mind-Blowing Shift: Rust's Typestate Pattern
+
+In standard C++, Java, or TypeScript, if a field is required (e.g. `host` must be specified), the builder checks this at **runtime**:
+```typescript
+if (!this.host) throw new Error("host is required"); // Runtime error!
+```
+
+In **Rust**, we can enforce required fields at **compile time** using zero-sized types (the **Typestate Pattern**). If you haven't set `host`, the `.build()` method **does not even exist**!
+
+<PatternDiagram chart={`
+flowchart LR
+    Start(( )) -->|"new"| NoHost["ServerBuilder_NoHost"]
+    NoHost -->|".host('127.0.0.1')"| WithHost["ServerBuilder_WithHost"]
+    WithHost -->|".build()"| Server["Server"]
+`} />
+
+---
+
+## 3. Multi-Language Rosetta Stone
+
+<Tabs items={['Rust (Typestate)', 'C++20 (Fluent)', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust (Typestate)">
+```rust
+// Marker types (Zero Sized Types)
+pub struct NoHost;
+pub struct HasHost(String);
+
+pub struct Server {
+    pub host: String,
+    pub port: u16,
+}
+
+// Builder parameterized by state
+pub struct ServerBuilder<H> {
+    host_state: H,
+    port: u16,
+}
+
+impl ServerBuilder<NoHost> {
+    pub fn new() -> Self {
+        ServerBuilder {
+            host_state: NoHost,
+            port: 8080, // Default port
+        }
+    }
+
+    pub fn host(self, host: &str) -> ServerBuilder<HasHost> {
+        ServerBuilder {
+            host_state: HasHost(host.to_string()),
+            port: self.port,
+        }
+    }
+}
+
+// .build() is ONLY implemented when host is HasHost!
+impl ServerBuilder<HasHost> {
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = port;
+        self
+    }
+
+    pub fn build(self) -> Server {
+        Server {
+            host: self.host_state.0,
+            port: self.port,
+        }
+    }
+}
+
+fn main() {
+    // let server = ServerBuilder::new().build(); // COMPILE ERROR! No method build()
+    let server = ServerBuilder::new().host("localhost").port(9000).build(); // OK!
+}
+```
+  </Tab>
+
+  <Tab value="C++20 (Fluent)">
+```cpp
+#include <iostream>
+#include <string>
+#include <optional>
+
+class Server {
+public:
+    std::string host;
+    uint16_t port;
+    int timeoutMs;
+
+    void start() const {
+        std::cout << "Starting server on " << host << ":" << port << "\n";
+    }
+};
+
+class ServerBuilder {
+private:
+    Server server;
+public:
+    ServerBuilder& host(std::string h) {
+        server.host = std::move(h);
+        return *this;
+    }
+
+    ServerBuilder& port(uint16_t p) {
+        server.port = p;
+        return *this;
+    }
+
+    ServerBuilder& timeout(int t) {
+        server.timeoutMs = t;
+        return *this;
+    }
+
+    Server build() {
+        if (server.host.empty()) {
+            throw std::runtime_error("host is required!");
+        }
+        if (server.port == 0) server.port = 8080;
+        return std::move(server);
+    }
+};
+```
+  </Tab>
+
+  <Tab value="TypeScript">
+```typescript
+interface ServerConfig {
+  host: string;
+  port: number;
+  timeoutMs?: number;
+}
+
+class ServerBuilder {
+  private config: Partial<ServerConfig> = { port: 8080 };
+
+  host(h: string): this {
+    this.config.host = h;
+    return this;
+  }
+
+  port(p: number): this {
+    this.config.port = p;
+    return this;
+  }
+
+  build(): ServerConfig {
+    if (!this.config.host) {
+      throw new Error("Server host is required.");
+    }
+    return this.config as ServerConfig;
+  }
+}
+```
+  </Tab>
+
+  <Tab value="JavaScript">
+```javascript
+class ServerBuilder {
+  constructor() {
+    this.hostVal = null;
+    this.portVal = 8080;
+  }
+
+  host(h) {
+    this.hostVal = h;
+    return this;
+  }
+
+  port(p) {
+    this.portVal = p;
+    return this;
+  }
+
+  build() {
+    if (!this.hostVal) throw new Error("host is required");
+    return { host: this.hostVal, port: this.portVal };
+  }
+}
+```
+  </Tab>
+</Tabs>
+
+---
+
+## 4. Language Nuances & Gotchas
+
+<Tabs items={['TypeScript', 'Rust', 'C++', 'JavaScript']}>
+  <Tab value="TypeScript">
+    ### Compile-Time Typestate with Phantom Types
+    The `<Has extends string = never>` generic tracks configured fields at compile time without runtime overhead:
+
+    ```typescript
+    class SafeHttpRequestBuilder<Has extends string = never> {
+      setMethod(): SafeHttpRequestBuilder<Has | "method"> { ... }
+      setUrl():    SafeHttpRequestBuilder<Has | "url"> { ... }
+
+      // build() can only be called when BOTH "method" AND "url" have been invoked:
+      build(this: SafeHttpRequestBuilder<"method" | "url">): HttpRequest { ... }
+    }
+    ```
+
+    <Callout type="info">
+    **Why the double cast?** In `return this as unknown as SafeHttpRequestBuilder<Has | "method">;`, TypeScript treats generic class instantiations as non-overlapping. The intermediate `unknown` cast safely allows phantom state progression.
+    </Callout>
+
+    ### Header Immutability: `Record<string, string>` is Insufficient
+    Headers can have multiple values (`Accept: text/html, application/json`). Use:
+    ```typescript
+    export type HeaderValue = string | readonly string[];
+    readonly headers: Readonly<Record<string, HeaderValue>>;
+    ```
+    And call `Object.freeze(this)` in the constructor so immutability is guaranteed at runtime.
+  </Tab>
+
+  <Tab value="Rust">
+    ### Consuming `self` by Value vs `&mut self`
+    Idiomatic Rust builders consume and return `self` by value:
+
+    ```rust
+    // Consuming builder — ergonomic and zero-allocation:
+    pub fn host(mut self, host: impl Into<String>) -> Self {
+        self.host = Some(host.into());
+        self // move ownership back
+    }
+
+    pub fn build(self) -> Result<HttpRequest, String> {
+        let host = self.host.ok_or("host is required")?;
+        // Consumes self: moves Strings/Vecs directly into product WITHOUT CLONING!
+        Ok(HttpRequest { host })
+    }
+    ```
+
+    <Callout type="warn">
+    A borrowing builder (`fn host(&mut self, ...)`) forces `.clone()` inside `.build()`. Consuming `self` moves heap allocations directly into the product.
+    </Callout>
+  </Tab>
+
+  <Tab value="C++">
+    ### Fluent References & Rvalue Qualifications
+    In C++, builders return `Builder&` to avoid copying the builder object during chaining:
+
+    ```cpp
+    HttpRequestBuilder& setUrl(std::string url) {
+        url_ = std::move(url);
+        return *this; // return reference for fluent chaining
+    }
+
+    // Rvalue-ref qualifier ensures caller calls on temporary or moved builder:
+    HttpRequest build() && {
+        return HttpRequest{std::move(method_), std::move(url_)};
+    }
+    ```
+
+    <Callout type="info">
+    Using `&&` on `build()` guarantees that intermediate builder state cannot be reused or left in an inconsistent moved-from state.
+    </Callout>
+  </Tab>
+
+  <Tab value="JavaScript">
+    ### Chaining Return Values & Runtime Validation
+    In JavaScript, fluent chaining fails silently if any setter forgets `return this`:
+
+    ```javascript
+    class HttpRequestBuilder {
+      setUrl(url) {
+        this.url = url;
+        return this; // Required for .setUrl().setMethod() chaining!
+      }
+
+      build() {
+        if (!this.url) {
+          throw new Error("Missing required field: url");
+        }
+        return Object.freeze(new HttpRequest(this));
+      }
+    }
+    ```
+
+    <Callout type="warn">
+    Because JavaScript has no compile-time typestate, runtime validation inside `.build()` is mandatory.
+    </Callout>
+  </Tab>
+</Tabs>
+
+
+---
+
+## 5. Hands-On Practice
+
+**[Go to 02. Builder Exercise & Solution](/docs/creational/02-builder-exercise)**
+
+**Per-language rough notes:** [TypeScript concepts](/docs/rough-notes/typescript/concepts) · [TypeScript gotchas](/docs/rough-notes/typescript/gotchas) · [Rust concepts](/docs/rough-notes/rust/concepts)
+

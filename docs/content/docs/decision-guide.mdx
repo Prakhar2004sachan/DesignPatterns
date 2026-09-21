@@ -1,0 +1,144 @@
+---
+title: Decision Guide (Which Pattern When?)
+description: Interactive flowchart, decision matrix, and trade-off guide for choosing the right creational pattern.
+---
+
+When facing an object creation problem, how do you know which pattern to apply? Choosing the wrong pattern leads to boilerplate explosion or awkward language friction. This guide is designed to walk you through the decision-making process, assuming you know the basics of programming but want a structured approach to architectural design.
+
+## Visual Decision Flowchart
+
+<PatternDiagram chart={`
+flowchart TD
+    Start["Do you need to create an object?"] --> Q1{"Is construction complex with many optional parameters or multi-step assembly?"}
+    
+    Q1 -- Yes --> Builder["BUILDER PATTERN<br/>(e.g., QueryBuilder, HttpRequest, ComputerAssembler)"]
+    Q1 -- No --> Q2{"Are you creating new objects by copying an existing configured instance?"}
+    
+    Q2 -- Yes --> Proto["PROTOTYPE PATTERN<br/>(e.g., DocumentClone, GameMonsterSpawner)"]
+    Q2 -- No --> Q3{"Do you need to create an entire FAMILY of related/dependent products that must match?"}
+    
+    Q3 -- Yes --> AbsFact["ABSTRACT FACTORY<br/>(e.g., Dark/Light Theme UI, Postgres/MySQL Driver Family)"]
+    Q3 -- No --> Q4{"Do you need a single product, but want subclasses/implementors to decide the concrete class?"}
+    
+    Q4 -- Yes --> FactMeth["FACTORY METHOD<br/>(e.g., DocumentEditor -> WordDocument / PdfDocument)"]
+    Q4 -- No --> Simple["Plain Constructor or Direct Function / Object Literal"]
+`} />
+
+---
+
+## Creational Patterns Comparison Matrix
+
+The table below breaks down the primary creational patterns. We contrast the textbook object-oriented approach with language-specific idioms that you might prefer to use.
+
+| Pattern | Primary Intent | Solves This Problem | What It Hides | Language Idiomatic Alternative |
+| :--- | :--- | :--- | :--- | :--- |
+| **Factory Method** | Defer instantiation of a **single object** to subclasses | Direct coupling to a concrete constructor. For instance, tightly binding your UI logic to a specific Button class. | Which concrete class is instantiated. The client only knows the interface. | **Rust:** Trait returning `Box<dyn Product>` or an `enum`<br/>**TS/JS:** Higher-order function or factory closure |
+| **Abstract Factory** | Create **families of related objects** without specifying concrete classes | Mixing incompatible products. For example, rendering a macOS Button inside a Windows Dialog box by mistake. | The entire family implementation and how the related objects are constructed. | **Rust:** Trait with multiple associated types or factory methods<br/>**TS:** Object of factory functions or module config |
+| **Builder** | Separate **multi-step construction** from representation | Telescoping constructors (e.g., `new Object(a, b, null, null, e)`), partial/invalid state during initialization. | Assembly sequence and internal parameter validation rules. | **Rust:** **Typestate Pattern** (Compile-time type transitions!)<br/>**TS/JS:** Options object (`{ timeout, retries }`) with Partial types |
+| **Prototype** | Create new objects by **cloning existing instances** | Expensive constructor calls (like fetching data from a database) or copying runtime configuration manually. | Internal structure copying details and deep-cloning complexity. | **Rust:** `Clone` trait (or custom boxed clone for trait objects)<br/>**TS/JS:** `structuredClone()`, `Object.create()`, or object spread |
+
+---
+
+## Key Scenarios: Quick Sanity Check
+
+### Scenario 1: "I have an object with 12 optional configuration flags"
+- **Do not use:** Factory Method. You would need 20 subclasses or methods with 12 arguments to cover the combinations.
+- **Use:** **Builder Pattern**.
+  - In **Rust**: Consider the *Typestate Pattern* if certain fields MUST be set before calling `.build()`. This allows the compiler to enforce the order of initialization.
+  - In **TypeScript**: If validation isn't complex, consider a plain config object `interface Config { ... }` with defaults rather than a full Builder class.
+
+### Scenario 2: "My UI toolkit needs Dark Mode and Light Mode widgets"
+- **Do not use:** Individual Factory Methods scattered everywhere. It becomes very easy to accidentally mix a Dark Button with a Light Window.
+- **Use:** **Abstract Factory**.
+  - One factory interface `GUIFactory` produces `Button`, `Checkbox`, and `Window`.
+  - A concrete `DarkThemeFactory` guarantees all three widgets belong to the Dark theme and share styling.
+
+### Scenario 3: "My document editor has an open() workflow, but subclasses decide format"
+- **Do not use:** Abstract Factory. You aren't creating a whole family of 5 different objects, just 1 document.
+- **Use:** **Factory Method**.
+  - Base class orchestrates the template algorithm (for example: `open() -> edit() -> save()`).
+  - Subclass overrides the specific `createDocument()` step to return the correct document type.
+
+### Scenario 4: "Spawning 500 game enemies with random variations of a baseline template"
+- **Do not use:** Builder or Factory reading from the database every time. This is extremely inefficient.
+- **Use:** **Prototype Pattern**.
+  - Load the template monster once from the database, clone it 500 times in memory, and tweak the delta properties like position and health.
+
+---
+
+## Language-Specific Selection Notes
+
+*Real-world design tradeoffs when implementing patterns across different language paradigms:*
+
+<Tabs items={['Rust', 'C++', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust">
+    ### Prefer Enum Dispatch When the Family Set Is Closed
+
+    If you know all factory variants at compile time, use an `enum` combined with `match` instead of relying on `Box<dyn Trait>`:
+    - **Zero heap allocation**: There is no `Box`, which means no dynamic memory allocation and no virtual method table (vtable) pointer overhead.
+    - **Zero-cost dispatch**: The `match` statement optimizes to a simple jump table or inlined branches, making execution extremely fast.
+    - **Exhaustive checks**: Adding a new variant to the enum forces you to update all `match` arms at compile time, preventing runtime errors.
+
+    ```rust
+    enum Os { Windows, Mac }
+    match os {
+        Os::Windows => WinFactory::new(),
+        Os::Mac     => MacFactory::new(),
+    }
+    ```
+
+    <Callout type="info">
+    Use `Box<dyn GUIFactory>` only when factories are dynamically loaded from external plugins or configuration files at runtime where the concrete type is strictly unknown.
+    </Callout>
+  </Tab>
+
+  <Tab value="C++">
+    ### Prefer Smart Pointers (`std::unique_ptr`) Over Raw Pointers
+
+    Raw pointer factories (e.g., `Document* createDocument()`) require manual `delete` statements and leak memory easily if an exception is thrown before cleanup. Modern C++ factory methods should return `std::unique_ptr<Document>`:
+
+    ```cpp
+    virtual std::unique_ptr<Document> createDocument() const = 0;
+    ```
+
+    `std::unique_ptr` enforces strict single ownership. When the pointer goes out of scope, the object is destroyed automatically. This provides RAII (Resource Acquisition Is Initialization) guarantees, ensuring zero memory leaks.
+
+    <Callout type="warn">
+    Always ensure the base class has a `virtual ~Document() = default;` destructor, otherwise deleting through a base pointer skips the derived class destructor.
+    </Callout>
+  </Tab>
+
+  <Tab value="TypeScript">
+    ### Object Literal Factories Often Beat Class Hierarchies
+
+    TypeScript's structural typing means that an object literal with matching method signatures automatically satisfies an interface without requiring any `class` or `implements` keyword. This results in less boilerplate.
+
+    ```typescript
+    const macFactory: GUIFactory = {
+      createButton:   () => ({ render: () => console.log("Mac Button") }),
+      createCheckbox: () => ({ toggle: () => console.log("Mac Checkbox") }),
+    };
+    ```
+
+    <Callout type="info">
+    Reach for traditional classes only when you explicitly need inheritance, `instanceof` runtime brand checks, or private state encapsulation using `#privateField`.
+    </Callout>
+  </Tab>
+
+  <Tab value="JavaScript">
+    ### Function Closures & Duck Typing
+
+    In JavaScript, the most idiomatic "abstract factory" is a plain factory function returning an object closure. It is highly readable and avoids confusion around the `this` context.
+
+    ```javascript
+    const createMacFactory = () => ({
+      createButton:   () => ({ render: () => console.log("Mac Button") }),
+      createCheckbox: () => ({ toggle: () => console.log("Mac Checkbox") }),
+    });
+    ```
+
+    <Callout type="warn">
+    If you must implement class hierarchies in JavaScript, always use `new.target` guards in the constructor to prevent direct instantiation of abstract classes, and use `throw new Error()` in abstract methods to catch missing implementations.
+    </Callout>
+  </Tab>
+</Tabs>

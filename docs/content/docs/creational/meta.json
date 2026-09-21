@@ -1,0 +1,11 @@
+{
+  "title": "Creational Patterns",
+  "pages": [
+    "01-abstract-factory",
+    "01-abstract-factory-exercise",
+    "02-builder",
+    "02-builder-exercise",
+    "03-factory-method",
+    "04-prototype"
+  ]
+}

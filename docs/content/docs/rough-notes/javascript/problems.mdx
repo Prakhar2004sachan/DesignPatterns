@@ -1,0 +1,120 @@
+---
+title: "JavaScript – Problems & Runtime Errors"
+description: "Silent failures, missing abstract method traps, and mutability issues I hit in JavaScript."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+---
+
+## Problem 1 — Silent `undefined` When Forgetting to Override Base Methods
+
+**Pattern**: Factory Method / Abstract Factory  
+**Symptom**: No compiler error, but runtime crash downstream with `TypeError: Cannot read properties of undefined (reading 'open')`.
+
+### What Happened
+In JavaScript, classes don't have native `abstract` methods or interfaces. If you write an empty method in the base class:
+
+```javascript
+class DocumentEditor {
+  createDocument() {
+    // Left empty for subclasses to implement
+  }
+
+  run() {
+    const doc = this.createDocument();
+    doc.open(); // 💥 TypeError: Cannot read properties of undefined!
+  }
+}
+```
+
+If a derived class forgets to implement `createDocument()`, JavaScript does not complain at instantiation. Instead, it silently returns `undefined`. The crash only happens when `run()` tries to invoke `.open()` on `undefined`.
+
+### Fix: Throw Explicit Error in Base Class
+```javascript
+class DocumentEditor {
+  createDocument() {
+    throw new Error(
+      `Abstract method 'createDocument()' must be implemented by subclass '${this.constructor.name}'`
+    );
+  }
+}
+```
+
+Now, if a subclass fails to implement the method, the error points immediately to the missing factory method with the exact subclass name.
+
+---
+
+## Problem 2 — Abstract Classes Being Directly Instantiated
+
+**Pattern**: Factory Method / Abstract Factory  
+**Symptom**: A developer writes `const editor = new DocumentEditor();` directly, creating a non-functional shell.
+
+### Root Cause
+JavaScript has no native `abstract class` keyword. Any class can be invoked with `new`.
+
+### Fix: The `new.target` Guard
+```javascript
+class DocumentEditor {
+  constructor() {
+    if (new.target === DocumentEditor) {
+      throw new Error(
+        "Cannot instantiate abstract class 'DocumentEditor' directly. Use a concrete subclass like 'WordEditor'."
+      );
+    }
+  }
+}
+```
+
+- When someone calls `new DocumentEditor()`: `new.target === DocumentEditor` $\rightarrow$ throws immediate descriptive error.
+- When someone calls `new WordEditor()`: `new.target === WordEditor` $\rightarrow$ passes through safely.
+
+---
+
+## Problem 3 — Object Mutation After Construction (Builder Pattern)
+
+**Pattern**: Builder  
+**Symptom**: Callers mutate fields on `HttpRequest` after `.build()`, corrupting shared requests.
+
+### Root Cause
+JavaScript objects are completely mutable by default. Unlike Rust (move semantics) or TypeScript (`readonly` modifier), JavaScript properties can be modified or deleted by any caller at any time.
+
+### Fix: `Object.freeze()`
+```javascript
+class HttpRequest {
+  constructor(builder) {
+    this.method = builder.method;
+    this.url = builder.url;
+    this.headers = Object.freeze({ ...builder.headers });
+    this.body = builder.body;
+    
+    // Freeze the instance itself:
+    Object.freeze(this);
+  }
+}
+```
+
+Any attempt to reassign `request.url = "..."` or add headers will throw a `TypeError` in strict mode or fail silently in non-strict mode.
+
+---
+
+## Problem 4 — Builder Method Chaining Lost Without `return this`
+
+**Pattern**: Builder  
+**Symptom**: `TypeError: Cannot read properties of undefined (reading 'url')` when chaining methods.
+
+### Root Cause
+In fluent builders:
+```javascript
+builder.setMethod("POST").setUrl("https://api.com");
+```
+If `setMethod()` forgets `return this;`, the returned value is `undefined`, breaking the fluent chain.
+
+### Fix
+Always end every builder setter with `return this`:
+```javascript
+setMethod(method) {
+  this.method = method;
+  return this;
+}
+```

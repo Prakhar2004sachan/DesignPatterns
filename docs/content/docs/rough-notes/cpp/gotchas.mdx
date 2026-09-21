@@ -1,0 +1,42 @@
+---
+title: "C++ – Gotchas & Surprises"
+description: "Subtle C++ things that were non-obvious or caught me off-guard."
+---
+
+---
+
+## Gotcha 1 — `virtual` Is Not Inherited Automatically
+
+If you mark a method `virtual` in the base class, derived class methods **automatically override** it (even without the `override` keyword). Always add `override` explicitly to catch typos:
+```cpp
+void open() const override { ... } // compiler checks signature matches
+void opne() const override { ... } // compiler error: no matching base method
+```
+
+---
+
+## Gotcha 2 — `std::function` Can Heap-Allocate
+
+`std::function` uses **Small Buffer Optimization (SBO)** — small lambdas are stored inline. But the moment a lambda captures a large object or the function exceeds the SBO size (~32 bytes), it **heap-allocates** internally. This is why you should pass it by `const &` rather than by value to avoid unnecessary copies + potential heap churn.
+
+---
+
+## Gotcha 3 — `auto doc = createDocument()` Transfers Ownership
+
+Because `createDocument()` returns `std::unique_ptr<Document>`, the `auto doc = createDocument()` line **moves** ownership into `doc`. There is no copy. When `doc` goes out of scope at the end of `run()`, the document is automatically destroyed. You never call `delete`.
+
+---
+
+## Gotcha 4 — `= 0` Makes a Class Abstract, Not Just the Method
+
+Marking even one method `= 0` makes the **entire class** abstract. You cannot instantiate it:
+```cpp
+DocumentEditor e; // error: cannot instantiate abstract type
+```
+This is intentional — it forces you to use a concrete subclass.
+
+---
+
+## Gotcha 5 — CommandLineTools SDK vs Xcode SDK on macOS
+
+`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` and `/Applications/Xcode.app/.../MacOSX.sdk` are **different SDKs** with potentially different ABIs. The CommandLineTools one can be a preview SDK that breaks linker compatibility. Always use the Xcode one.

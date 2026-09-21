@@ -1,0 +1,40 @@
+---
+title: "JavaScript – Gotchas & Surprises"
+description: "Subtle JavaScript behaviours that surprised me."
+---
+
+---
+
+## Gotcha 1 — Silent Failure When Base Class Methods Are Empty
+
+If you forget to `throw` in a base class method and a subclass forgets to override it, JavaScript **silently calls the empty base method and returns `undefined`**. No error, no warning. This causes `TypeError: Cannot read properties of undefined (reading 'open')` far downstream — making the real bug very hard to trace.
+
+**Pattern**: Always use `throw new Error("Abstract method: must be implemented")` in base class methods.
+
+---
+
+## Gotcha 2 — `new.target` for Preventing Direct Instantiation
+
+```js
+class Document {
+  constructor() {
+    if (new.target === Document) {
+      throw new Error("Cannot instantiate abstract class Document directly");
+    }
+  }
+}
+new Document(); // throws immediately
+new WordDocument(); // works, new.target is WordDocument
+```
+
+---
+
+## Gotcha 3 — Object Literal Factory is Idiomatic JS
+
+```js
+const createMacFactory = () => ({
+  createButton:   () => ({ paint: () => console.log("Mac Button") }),
+  createCheckbox: () => ({ paint: () => console.log("Mac Checkbox") }),
+});
+```
+This is **duck typing at its finest**. No class, no `extends`, no `implements` — just an object with the right shape. This is often the most idiomatic way to express a factory in JavaScript.

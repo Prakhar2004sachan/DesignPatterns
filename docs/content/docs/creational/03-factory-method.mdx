@@ -1,0 +1,405 @@
+---
+title: 03. Factory Method Pattern
+description: One product, deferred instantiation — and everything I actually learned while building it in Rust, C++, TypeScript, and JavaScript.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+## 1. Intent & Mental Model
+
+The **Factory Method Pattern** defines an interface for creating **a single object**, but lets **subclasses or implementations decide which concrete class to instantiate**.
+
+> **Beginner's Intuition:** Think of a logistics company. Originally, they only delivered by trucks, so their system is hardcoded to create `Truck` objects. Later, they add sea deliveries. Instead of rewriting the entire system, they create a general `Logistics` base class with a `createTransport()` method. A `RoadLogistics` subclass overrides it to return a `Truck`, while a `SeaLogistics` subclass overrides it to return a `Ship`. The main application just calls `createTransport()` without worrying about the exact vehicle type.
+
+> **Key rule:** The Creator calls its own factory method internally. The client only picks _which_ Creator — it never instantiates the product itself. If the client is the one calling `new Product()`, that's **Dependency Injection**, not Factory Method.
+
+<PatternDiagram chart={`
+flowchart TD
+    Client["Client Code"] -->|selects| WordEditor["WordEditor"]
+    Client -->|selects| PdfEditor["PdfEditor"]
+
+    subgraph CreatorHierarchy["Creator Hierarchy"]
+        DocumentEditor["DocumentEditor<br/><i>(Creator Interface / Abstract Class)</i><br/>+ create_document(): Document<br/>+ open_document(): void"]
+        WordEditor -->|implements / extends| DocumentEditor
+        PdfEditor  -->|implements / extends| DocumentEditor
+    end
+
+    subgraph ProductHierarchy["Product Hierarchy"]
+        Document["Document<br/><i>(Product Interface)</i><br/>+ open()<br/>+ edit()<br/>+ save()"]
+        WordDoc["WordDocument"] -->|implements| Document
+        PdfDoc  -->|implements| Document
+    end
+
+    WordEditor -.->|instantiates| WordDoc
+    PdfEditor  -.->|instantiates| PdfDoc
+`} />
+
+---
+
+## 2. Multi-Language Implementations
+
+<Tabs items={['Rust', 'C++', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust">
+
+```rust
+// ── Product ──────────────────────────────────────────────
+pub trait Document {
+    fn open(&self);
+    fn edit(&self);
+    fn save(&self);
+}
+
+pub struct WordDocument;
+impl Document for WordDocument {
+    fn open(&self) { println!("Opening Word doc."); }
+    fn edit(&self) { println!("Editing Word doc."); }
+    fn save(&self) { println!("Saving Word doc."); }
+}
+
+pub struct PdfDocument;
+impl Document for PdfDocument {
+    fn open(&self) { println!("Opening PDF doc."); }
+    fn edit(&self) { println!("Editing PDF doc."); }
+    fn save(&self) { println!("Saving PDF doc."); }
+}
+
+// ── Creator ───────────────────────────────────────────────
+pub trait DocumentEditor {
+    // Factory Method — subtype provides the concrete product
+    fn create_document(&self) -> Box<dyn Document>;
+
+    // Template Method — always calls the factory method internally
+    fn run(&self) {
+        let doc = self.create_document();
+        doc.open();
+        doc.edit();
+        doc.save();
+    }
+}
+
+pub struct WordEditor;
+impl DocumentEditor for WordEditor {
+    fn create_document(&self) -> Box<dyn Document> {
+        Box::new(WordDocument)
+    }
+}
+
+pub struct PdfEditor;
+impl DocumentEditor for PdfEditor {
+    fn create_document(&self) -> Box<dyn Document> {
+        Box::new(PdfDocument)
+    }
+}
+
+// ── Functional style (higher-order function) ──────────────
+// F is a closure type, D is the concrete Document type.
+// Both must be known at compile time → generics required.
+fn run_editor<F, D>(create: F)
+where
+    F: Fn() -> D,
+    D: Document,
+{
+    let doc = create();
+    doc.open();
+    doc.edit();
+    doc.save();
+}
+
+fn main() {
+    // OOP style:
+    let editor: Box<dyn DocumentEditor> = Box::new(WordEditor);
+    editor.run();
+
+    // Functional style — pass a closure factory:
+    run_editor(|| PdfDocument);
+}
+```
+  </Tab>
+
+  <Tab value="C++">
+
+```cpp
+#include <iostream>
+#include <memory>
+#include <functional>
+
+// ── Product ───────────────────────────────────────────────
+class Document {
+public:
+    virtual ~Document() = default;   // MUST be virtual — see note below
+    virtual void open() = 0;         // = 0  makes this pure virtual (abstract)
+    virtual void edit() = 0;
+    virtual void save() = 0;
+};
+
+class WordDocument : public Document {
+public:
+    void open() override { std::cout << "Opening Word doc\n"; }
+    void edit() override { std::cout << "Editing Word doc\n"; }
+    void save() override { std::cout << "Saving Word doc\n"; }
+};
+
+class PdfDocument : public Document {
+public:
+    void open() override { std::cout << "Opening PDF doc\n"; }
+    void edit() override { std::cout << "Editing PDF doc\n"; }
+    void save() override { std::cout << "Saving PDF doc\n"; }
+};
+
+// ── Creator ───────────────────────────────────────────────
+class DocumentEditor {
+public:
+    virtual ~DocumentEditor() = default;
+
+    // Factory Method — pure virtual; subclass must implement
+    virtual std::unique_ptr<Document> createDocument() const = 0;
+
+    // Template Method — calls the factory method internally
+    void openDocument() const {
+        auto doc = createDocument();   // ownership transferred here
+        doc->open();
+        doc->edit();
+        doc->save();
+    }                                  // doc destroyed automatically (RAII)
+};
+
+class WordEditor : public DocumentEditor {
+public:
+    std::unique_ptr<Document> createDocument() const override {
+        return std::make_unique<WordDocument>();
+    }
+};
+
+class PdfEditor : public DocumentEditor {
+public:
+    std::unique_ptr<Document> createDocument() const override {
+        return std::make_unique<PdfDocument>();
+    }
+};
+
+// ── Functional style ─────────────────────────────────────
+// const& avoids copying the std::function (which may heap-allocate internally)
+void runEditor(const std::function<std::unique_ptr<Document>()>& create) {
+    auto doc = create();
+    doc->open();
+    doc->edit();
+    doc->save();
+}
+
+int main() {
+    // OOP style:
+    std::unique_ptr<DocumentEditor> editor = std::make_unique<WordEditor>();
+    editor->openDocument();
+
+    // Functional style — pass a lambda factory:
+    runEditor([]() -> std::unique_ptr<Document> {
+        return std::make_unique<PdfDocument>();
+    });
+}
+```
+  </Tab>
+
+  <Tab value="TypeScript">
+
+```typescript
+// ── Product ───────────────────────────────────────────────
+interface Documentv2 {
+  open(): void;
+  edit(): void;
+  save(): void;
+}
+
+class WordDocument implements Documentv2 {
+  open() { console.log("Opening Word doc"); }
+  edit() { console.log("Editing Word doc"); }
+  save() { console.log("Saving Word doc"); }
+}
+
+class PdfDocument implements Documentv2 {
+  open() { console.log("Opening PDF doc"); }
+  edit() { console.log("Editing PDF doc"); }
+  save() { console.log("Saving PDF doc"); }
+}
+
+// ── Creator (interface-based, generic) ────────────────────
+// T extends Documentv2 constrains: only types that satisfy the Document
+// interface can be used as the product. Checked at compile time.
+interface DocumentEditor<T extends Documentv2> {
+  create(): T;
+  run(): void;
+}
+
+// ── Functional style ─────────────────────────────────────
+// The generic constraint is on the function, not a class.
+function runEditor<T extends Documentv2>(editor: { create: () => T }): void {
+  const doc = editor.create();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
+// ── Usage ─────────────────────────────────────────────────
+// TypeScript uses STRUCTURAL typing — the object literal satisfies
+// { create: () => T } by shape, not by class name.
+runEditor({ create: () => new WordDocument() });
+runEditor({ create: () => new PdfDocument() });
+```
+  </Tab>
+
+  <Tab value="JavaScript">
+
+```javascript
+// In JavaScript there are no interfaces — we simulate them with throw.
+class DocumentEditor {
+  // "Abstract" factory method — subclasses MUST override this
+  createDocument() {
+    throw new Error("createDocument() must be implemented by subclass");
+  }
+
+  // Template method — always calls the factory method
+  openDocument() {
+    const doc = this.createDocument();
+    doc.open();
+    doc.edit();
+    doc.save();
+  }
+}
+
+class WordEditor extends DocumentEditor {
+  createDocument() {
+    return {
+      open: () => console.log("Opening Word doc"),
+      edit: () => console.log("Editing Word doc"),
+      save: () => console.log("Saving Word doc"),
+    };
+  }
+}
+
+class PdfEditor extends DocumentEditor {
+  createDocument() {
+    return {
+      open: () => console.log("Opening PDF doc"),
+      edit: () => console.log("Editing PDF doc"),
+      save: () => console.log("Saving PDF doc"),
+    };
+  }
+}
+
+const editor = new WordEditor();
+editor.openDocument();
+```
+  </Tab>
+</Tabs>
+
+---
+
+## 3. Pattern Anatomy — What Each Part Is
+
+| Role | Rust | C++ | TypeScript | JavaScript |
+| :--- | :--- | :--- | :--- | :--- |
+| **Product interface** | `trait Document` | `abstract class Document` | `interface Documentv2` | duck-typed object |
+| **Concrete product** | `struct WordDocument` | `class WordDocument` | `class WordDocument` | object literal / class |
+| **Creator interface** | `trait DocumentEditor` | `abstract class DocumentEditor` | `interface DocumentEditor<T>` | class with `throw` |
+| **Factory method** | `fn create_document(&self) -> Box<dyn Document>` | `virtual unique_ptr<Document> createDocument() = 0` | `create(): T` | `createDocument()` |
+| **Template method** | `fn run(&self)` | `void openDocument()` | `run()` | `openDocument()` |
+
+---
+
+## 4. Language Nuances & Gotchas
+
+<Tabs items={['Rust', 'C++', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust">
+    ### Dependency Injection vs Factory Method
+    When implementing Factory Method in Rust, avoid writing:
+    ```rust
+    let editor = Editor::new(PdfDocument); // Dependency Injection: main() creates the product
+    ```
+    In **Factory Method**, the Creator creates the product internally via `create_document()`:
+    ```rust
+    let editor = PdfEditor; // Factory Method: Creator instantiates product internally
+    editor.run();
+    ```
+
+    ### Why Closure Factories Need `<F, D>` Generics
+    Every closure in Rust has a **unique, anonymous, compiler-generated type**. You cannot name it:
+    ```rust
+    fn run_editor<F, D>(create: F)
+    where
+        F: Fn() -> D,
+        D: Document,
+    ```
+    - `<F>` captures the anonymous closure type.
+    - `<D>` tells the compiler the concrete size to allocate on the stack for `let doc = create();`.
+    - Passing `run_editor(|| PdfDocument)` passes a **factory closure**; passing `run_editor(PdfDocument)` passes an already-created value.
+  </Tab>
+
+  <Tab value="C++">
+    ### Virtual Functions, `= 0`, and the Virtual Destructor
+    - **`virtual`**: Tells the compiler to look up the method at runtime via the vtable instead of static compile-time binding.
+    - **`= 0`**: Makes the method pure virtual and the entire class abstract.
+    - **`virtual ~Document() = default;`**: Essential. If a base class destructor is not virtual, deleting through a base pointer skips the derived class destructor.
+
+    ### `std::function` and Passing by `const &`
+    ```cpp
+    void runEditor(const std::function<std::unique_ptr<Document>()>& create)
+    ```
+    `std::function` uses Small Buffer Optimization (SBO). If a lambda captures large variables, copying `std::function` triggers **heap allocation**. Passing by `const &` passes the reference cleanly with zero copy overhead.
+
+    <Callout type="warn">
+    Covariant return types don't work with smart pointers. An override cannot return `std::unique_ptr<WordDocument>` when the base declares `std::unique_ptr<Document>`. Keep the base return type and use `std::make_unique<WordDocument>()` inside.
+    </Callout>
+  </Tab>
+
+  <Tab value="TypeScript">
+    ### Generic Constraints: `<T extends Documentv2>`
+    The `<T extends Documentv2>` constraint preserves the concrete return type of the factory while guaranteeing that `open()`, `edit()`, and `save()` exist at compile time:
+    ```typescript
+    interface DocumentEditor<T extends Documentv2> {
+      create(): T;
+      run(): void;
+    }
+    ```
+
+    ### Structural Typing in Factories
+    In TypeScript, an object literal satisfies an interface without `implements`:
+    ```typescript
+    runEditor({ create: () => new WordDocument() });
+    ```
+    TypeScript checks structure, not nominal class hierarchies.
+  </Tab>
+
+  <Tab value="JavaScript">
+    ### Simulating Abstract Classes
+    JavaScript has no `abstract` keyword. Empty methods silently return `undefined`, causing confusing downstream errors:
+    ```javascript
+    createDocument() {
+      throw new Error("createDocument() must be implemented by subclass");
+    }
+    ```
+    Always throw inside base methods to ensure immediate failure.
+
+    ### Guarding Abstract Constructors
+    ```javascript
+    constructor() {
+      if (new.target === DocumentEditor) {
+        throw new Error("Cannot instantiate abstract class directly");
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+
+---
+
+## 5. Full Source Document
+
+**[View Original Factory Method Reference (800+ lines)](/docs/originals/03-factory-method)**
+
+**Per-language rough notes:**
+- [Rust concepts & problems](/docs/rough-notes/rust/concepts) · [gotchas](/docs/rough-notes/rust/gotchas) · [problems](/docs/rough-notes/rust/problems)
+- [C++ concepts & problems](/docs/rough-notes/cpp/concepts) · [gotchas](/docs/rough-notes/cpp/gotchas) · [problems](/docs/rough-notes/cpp/problems)
+- [TypeScript concepts](/docs/rough-notes/typescript/concepts) · [gotchas](/docs/rough-notes/typescript/gotchas)
+- [JavaScript concepts](/docs/rough-notes/javascript/concepts) · [gotchas](/docs/rough-notes/javascript/gotchas)

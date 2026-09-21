@@ -1,0 +1,429 @@
+---
+title: "TypeScript – Gotchas & Surprises"
+description: "Subtle TypeScript behaviours that surprised me or took time to understand."
+---
+
+---
+
+## Gotcha 1 — Filtering Headers: `existing !== key` Logic
+
+It feels weird at first glance because we usually think of identical keys (e.g. `"hello"` and `"hello"`). 
+
+However, this condition exists because **HTTP headers are case-insensitive**, but **JavaScript objects are case-sensitive**.
+
+---
+
+### The Problem in JavaScript
+
+In JavaScript, `"Content-Type"` and `"content-type"` are treated as **two completely separate keys**:
+
+```js
+const headers = {};
+
+headers["Content-Type"] = "text/html";
+headers["content-type"] = "application/json";
+
+console.log(headers);
+// Output has DUPLICATE headers:
+// {
+//   "Content-Type": "text/html",
+//   "content-type": "application/json"
+// }
+```
+
+In HTTP (RFC 9110), these are the **exact same header**! A request should not have both.
+
+---
+
+### How `findHeaderKey` + `existing !== key` Solves It
+
+Look at `findHeaderKey`:
+```ts
+function findHeaderKey(headers: Record<string, HeaderValue>, key: string) {
+  const lower = key.toLowerCase();
+  // It searches case-insensitively!
+  return Object.keys(headers).find((k) => k.toLowerCase() === lower);
+}
+```
+
+Now let's trace what happens when someone changes casing:
+
+#### Scenario A: The casing is DIFFERENT (The condition triggers!)
+
+1. User first sets:
+   ```ts
+   builder.header("Content-Type", "text/html");
+   // headers = { "Content-Type": "text/html" }
+   ```
+
+2. Later, user (or a middleware) overwrites it with lowercase:
+   ```ts
+   builder.header("content-type", "application/json");
+   ```
+
+3. Trace `setHeader`:
+   - `key` = `"content-type"`
+   - `findHeaderKey` looks for matching lowercase and finds: `existing` = `"Content-Type"`
+   - **`existing !== key`** checks:
+     $$\text&#123;"Content-Type" !== "content-type" &#125; \longrightarrow \mathbf&#123;TRUE!&#125;$$
+   - **`delete headers["Content-Type"]`** removes the old capitalized key!
+   - `headers["content-type"] = "application/json"` sets the new key.
+
+**Result:** Clean object without duplicate casing:
+```js
+{ "content-type": "application/json" }
+```
+
+---
+
+#### Scenario B: The casing is IDENTICAL (`"hello"` and `"hello"`)
+
+1. User sets:
+   ```ts
+   builder.header("hello", "world1");
+   // headers = { "hello": "world1" }
+   ```
+
+2. User sets again:
+   ```ts
+   builder.header("hello", "world2");
+   ```
+
+3. Trace `setHeader`:
+   - `key` = `"hello"`
+   - `existing` = `"hello"`
+   - `existing !== key` is **`"hello" !== "hello"`** $\longrightarrow$ **FALSE**.
+   - The `delete` is skipped (no need to delete).
+   - Line 99 simply overwrites: `headers["hello"] = "world2"`.
+
+---
+
+### Summary
+`existing !== key` means:  
+*"An existing header was found with the **same name but different casing** (e.g. `Content-Type` vs `content-type`). Delete the old casing so JavaScript doesn't store two duplicate keys."*
+
+---
+
+## Gotcha 2 — Method Shorthand vs Arrow Property
+
+In TypeScript, both work for basic cases, but they have fundamentally different meanings under the hood.
+
+Here is the difference between:
+
+```ts
+// 1. Method syntax (What you wrote)
+method(action: Method): this;
+
+// 2. Property / Arrow function syntax (What you asked about)
+method: (action: Method) => this;
+```
+
+---
+
+### 1. Prototype Method vs Instance Property (OOP Semantics)
+
+This is the biggest conceptual difference:
+
+* **Method syntax `method(...)`** describes a **prototype method**:
+  ```ts
+  class DefaultHttpRequestBuilder implements HttpRequestBuilder {
+    // Stored once on DefaultHttpRequestBuilder.prototype (memory-efficient)
+    method(action: Method): this {
+      return this;
+    }
+  }
+  ```
+
+* **Property syntax `method: (...) => ...`** tells TypeScript this is an **own instance property** holding a function (usually an arrow function):
+  ```ts
+  class DefaultHttpRequestBuilder implements HttpRequestBuilder {
+    // Re-created as a brand new closure function on EVERY single instance:
+    method = (action: Method): this => {
+      return this;
+    };
+  }
+  ```
+
+In Builder patterns and OOP interfaces, builders use regular class methods on the prototype, so **method syntax `method(...): this;`** is the standard convention.
+
+---
+
+### 2. Method Overloading
+
+Method syntax allows you to define **multiple overloaded signatures** for the same function. Property syntax does not:
+
+```ts
+// Method syntax supports overloads:
+interface HttpRequestBuilder {
+  header(key: string, value: string): this;
+  header(headers: Record<string, string>): this; // Allowed!
+}
+
+// Property syntax CANNOT do overloads:
+interface HttpRequestBuilder {
+  header: (key: string, value: string) => this;
+  header: (headers: Record<string, string>) => this; 
+  // Error: Duplicate identifier 'header'!
+}
+```
+
+---
+
+### 3. The Explicit `this` Parameter (Our Typestate Builder!)
+
+Remember the compile-time safe builder from section 10c?
+
+```ts
+build(this: SafeHttpRequestBuilder<"method" | "url">): HttpRequest;
+```
+
+Method syntax allows you to specify the **`this` parameter** to enforce compile-time constraints. Property syntax cannot do this cleanly.
+
+---
+
+### 4. Type Checking (`--strictFunctionTypes`)
+
+In TypeScript's `--strict` mode:
+* **Property functions `(x) => y`** are checked **contravariantly** (very strict).
+* **Methods `foo(x): y`** are checked **bivariantly** (more forgiving, allowing classes to implement interface methods with slightly wider/narrower parameter types without type errors).
+
+---
+
+### Summary Cheatsheet
+
+| Feature | Method Syntax: `fn(): void` | Property Syntax: `fn: () => void` |
+| :--- | :--- | :--- |
+| **Best Used For** | Class contracts, Builders, OOP interfaces | Callbacks, Event listeners, React props |
+| **Class Target** | Prototype methods (`MyClass.prototype.fn`) | Instance arrow properties (`this.fn = () => {}`) |
+| **Overloads** | Supported | Error |
+| **`this` parameter trick** | Supported | Not supported |
+
+---
+
+> [!TIP]
+> **Quick heads-up on lines 126–127 in your [`indexx.ts`](file:///Users/prakharsachan/Developer/DesignPattern/02_Builder_Exercise/ts/src/indexx.ts#L126-L127):**
+> - In line 126: `appendHeader(key: string, value: HeadersInput): this;`  
+>   $\rightarrow$ `value` should be `HeaderValue` (a single header or string array), not `HeadersInput`.
+> - In line 127: `headers(key: string, value: HeadersInput): this;`  
+>   $\rightarrow$ `headers(...)` takes a single bulk object/entries argument: `headers(headers: HeadersInput): this;` (no `key` parameter needed).
+
+---
+
+## Gotcha 3 — Typestate Phantom Branding with `<Has extends string = never>`
+
+Both of these lines work together to implement the **Typestate Pattern** in TypeScript. 
+
+Here is what each one does:
+
+---
+
+### Part 1: `<Has extends string = never>` (The Type-Level Checklist)
+
+Think of `Has` as a **compile-time checklist** of fields that have been set so far.
+
+```ts
+class SafeHttpRequestBuilder<Has extends string = never>
+//                           ▲   ▲              ▲
+//                           │   │              └─ 3. Default: starts EMPTY
+//                           │   └─ 2. Must be string literals ("method", "url", etc.)
+//                           └─ 1. Generic type variable (the "state")
+```
+
+1. **`= never` (The Default State):**  
+   In TypeScript, `never` represents the **empty set**. When you do `new SafeHttpRequestBuilder()`, `Has` defaults to `never`, meaning: *"No required fields have been set yet."*
+
+2. **How it accumulates fields:**  
+   Every time you call a method, TypeScript adds a new tag to `Has` using a union (`|`):
+   ```ts
+   // 1. Initial state: Has is `never`
+   const b1 = new SafeHttpRequestBuilder(); 
+
+   // 2. You call .method(): Has becomes `never | "method"` = `"method"`
+   const b2 = b1.method(Method.GET); 
+
+   // 3. You call .url(): Has becomes `"method" | "url"`
+   const b3 = b2.url("https://api.com"); 
+
+   // Now Has contains BOTH "method" and "url"!
+   ```
+
+---
+
+### Part 2: `declare protected readonly _has: (has: Has) => void;` (The "Phantom Type")
+
+This is one of the most clever techniques in advanced TypeScript. It is called a **Phantom Type**.
+
+To understand why it exists, you have to know a quirk of TypeScript:
+
+#### The Problem: TypeScript is Structurally Typed
+TypeScript does **not** compare types by their names or generic parameters. It compares them **by their properties**.
+
+If your class has generic `<Has>`, but **no property inside the class actually uses `Has`**, TypeScript's compiler will say:
+> *"Wait, `SafeHttpRequestBuilder<never>` and `SafeHttpRequestBuilder<"method" | "url">` have the exact same fields in memory. Therefore, they are the same type!"*
+
+Without this line, TypeScript would collapse the types, destroying your compile-time safety!
+
+---
+
+#### Breaking down each word:
+
+1. **`declare`:**  
+   Tells the compiler: *"Treat this property as existing for type-checking, but **do not generate any JavaScript code** for it."*  
+   $\rightarrow$ It has **zero runtime cost** and takes **0 bytes of memory**.
+
+2. **`protected readonly`:**  
+   Keeps it hidden from user autocomplete (`builder._has` will not pollute user code).
+
+3. **Why `(has: Has) => void` instead of just `_has: Has`? (The Contravariance Secret):**  
+   This is the most important detail:
+   - In TypeScript, `"method"` is a subtype of `"method" | "url"` (covariance). If you used `_has: Has`, TypeScript might allow an incomplete builder with just `"method"` to be assigned where `"method" | "url"` is expected!
+   - But when `Has` is the **argument to a function** `(has: Has) => void`, TypeScript switches to **contravariance** (under `--strictFunctionTypes`).
+   - Contravariance strictly guarantees that **`SafeHttpRequestBuilder<"method">` can NEVER be confused with or assigned to `SafeHttpRequestBuilder<"method" | "url">`**.
+
+---
+
+### Summary Analogy
+
+| Code | Role | Analogy |
+| :--- | :--- | :--- |
+| `<Has extends string = never>` | **The Checklist** | A blank notepad (`never`) that gets checklist stamps (`"method"`, `"url"`) as you call methods. |
+| `declare protected _has: ...` | **The Stamp Lock (Phantom Type)** | Forces TypeScript's type-checker to physically enforce that the notepad actually has the required stamps before allowing `.build()`. |
+
+---
+
+## Gotcha 4 — Why `declare protected` and Not Just `protected`
+
+Here is why both **`declare`** and **`protected`** are used together:
+
+---
+
+### 1. Why `declare`? (Zero Runtime Cost)
+
+Without `declare`:
+```ts
+// WITHOUT 'declare':
+protected readonly _has: (has: Has) => void;
+```
+
+Two bad things happen:
+1. **TypeScript complains:**  
+   `error TS2564: Property '_has' has no initializer and is not definitely assigned in the constructor.`  
+   To make TypeScript happy, you would be forced to write dummy runtime garbage like: `_has = () => {};`
+2. **Wastes Memory in JavaScript:**  
+   TypeScript would emit a real property `this._has` into your JavaScript code at runtime. Every time you create a builder, memory is wasted storing a useless dummy function.
+
+#### With `declare`:
+```ts
+// WITH 'declare':
+declare protected readonly _has: (has: Has) => void;
+```
+`declare` tells the compiler:
+> *"This property exists **only for type-checking**. Do not emit any JavaScript for it, and do not ask me to initialize it."*
+
+In the compiled JavaScript, this line **completely vanishes** $\rightarrow$ **0 bytes of memory, 0 runtime overhead.**
+
+---
+
+### 2. Why `protected`? (Clean Developer Experience)
+
+`_has` is an **internal type-tracking trick**. The person using your builder should never know it exists.
+
+#### If it were `public`:
+When someone uses your builder in VS Code:
+```ts
+const builder = new SafeHttpRequestBuilder();
+builder. 
+//  ▲
+//  Autocomplete pops up and shows:
+//  - method()
+//  - url()
+//  - header()
+//  - _has (Confusing! Why is this here? Should I call it?)
+```
+
+#### By making it `protected`:
+1. **Hidden from autocomplete:** External consumers will only see real methods (`.method()`, `.url()`, `.build()`).
+2. **Subclass-friendly:** If someone creates a subclass (`class MyCustomBuilder extends SafeHttpRequestBuilder<Has>`), the subclass can inherit the state-tracking without losing type safety.
+
+---
+
+### Summary
+
+| Keyword | Why It's There |
+| :--- | :--- |
+| **`declare`** | Prevents initialization errors and ensures **zero JavaScript code / zero memory** is created at runtime. |
+| **`protected`** | Hides this internal mechanism so it **doesn't pollute user autocomplete**. |
+
+---
+
+## Gotcha 5 — `this as unknown as SafeHttpRequestBuilder<Has | "method">` — Double Cast
+
+Here is the honest truth: **In this exact method, you actually CAN write it directly!**
+
+```ts
+// This compiles completely fine in TypeScript:
+return this as SafeHttpRequestBuilder<Has | "method">;
+```
+
+So why do TypeScript developers often write `as unknown as T` (called a **Double Assertion**)? 
+
+Here is what is happening:
+
+---
+
+### 1. TypeScript's "Sufficient Overlap" Rule
+
+TypeScript normally tries to protect you from nonsensical type casts. It only allows `A as B` if `A` and `B` **sufficiently overlap** (i.e. one could plausibly be related to the other):
+
+```ts
+const num = 42;
+
+// TypeScript ERROR (TS2352):
+// Conversion of type 'number' to type 'string' may be a mistake 
+// because neither type sufficiently overlaps with the other.
+// If this was intentional, convert the expression to 'unknown' first.
+const str = num as string; 
+```
+
+Notice the hint in TypeScript's own error message:  
+> *"If this was intentional, convert the expression to 'unknown' first."*
+
+Because **everything is assignable to `unknown`**, and **`unknown` can be asserted to anything**, `unknown` acts as a universal bridge:
+
+```ts
+// The compiler lets you do it via the "unknown" bridge:
+const str = num as unknown as string;
+```
+
+---
+
+### 2. Why is it used in the Typestate Pattern?
+
+In typestate patterns, the whole purpose is to make `StateA` and `StateB` **incompatible** so you don't accidentally mix them up.
+
+If your type constraints or marker properties become very strict, TypeScript's compiler will say:
+> *"Hey! `SafeHttpRequestBuilder<"method">` and `SafeHttpRequestBuilder<"method" | "url">` are intentionally different states. You can't just cast one directly to the other!"*
+
+When that happens, TypeScript triggers error **TS2352**. 
+
+Developers frequently write:
+```ts
+return this as unknown as SafeHttpRequestBuilder<Has | "method">;
+```
+as a **defensive habit** in generic state machines to tell the compiler:
+> *"I know you see these as two different states, but at runtime it is the exact same builder object under the hood. Trust me."*
+
+---
+
+### Summary
+
+- **Can you write `return this as SafeHttpRequestBuilder<Has | "method">`?**  
+  **Yes!** It is completely valid here and cleaner.
+- **Why did we see `as unknown as`?**  
+  It's the standard TypeScript escape hatch ("double assertion") used whenever TypeScript thinks two generic types don't overlap enough.
+
+---
+
+## Gotcha 6 — Structural Typing: Object Literals Satisfy Interfaces
+
+Passing `&#123; create: () => new WordDocument() &#125;` to a function expecting `Creator<T>` works because TypeScript checks **shape**, not class name or explicit `implements`. An object with matching method signatures automatically satisfies the interface.

@@ -1,0 +1,205 @@
+---
+title: 01. Abstract Factory Exercise
+description: Practical challenge building an Abstract Factory for a multi-database layer (Postgres & MySQL) with progressive hints and solutions.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## The Challenge: Multi-Database Driver Layer
+
+Build an **Abstract Factory** for a database abstraction layer with two product families:
+
+- **Products**: `Connection` and `Command`
+- **Families**: `Postgres` and `MySQL`
+
+### Requirements
+1. `Connection` exposes `connect()` and `close()`.
+2. `Command` exposes `execute(sql)` and `prepare(sql)`.
+3. A factory `DatabaseFactory` creates both `Connection` and `Command`.
+4. A client function `runQuery(factory, sql)` uses the factory without knowing which underlying DB driver is in use.
+5. **Rust Bonus**: Compare a `dyn Trait` approach with an `enum` dispatch approach.
+
+---
+
+## Progressive Hints
+
+<Accordions>
+  <Accordion title="Hint 1: Product Family Matrix (No Code)">
+    Identify the grid:
+    - Row 1 (Postgres): `PostgresConnection`, `PostgresCommand`
+    - Row 2 (MySQL): `MySqlConnection`, `MySqlCommand`
+    
+    The abstract factory interface will have exactly 2 methods:
+    - `create_connection()`
+    - `create_command()`
+    
+    The client function should never mention Postgres or MySQL!
+  </Accordion>
+
+  <Accordion title="Hint 2: Memory & Ownership Strategy">
+    - **In Rust**: Products need heap allocation when returned from trait methods: `Box<dyn Connection>` and `Box<dyn Command>`.
+    - **In C++**: Use `std::unique_ptr<Connection>` and `std::unique_ptr<Command>`. Remember to give both abstract product classes virtual destructors!
+    - **In TypeScript**: Simple interfaces `Connection` and `Command` are sufficient.
+  </Accordion>
+
+  <Accordion title="Hint 3: Rust Enum Alternative (Bonus)">
+    Instead of `Box<dyn Connection>`, define an enum:
+    ```rust
+    enum DbConnection {
+        Postgres(PgConnection),
+        MySql(MySqlConnection),
+    }
+    ```
+    This uses **static dispatch** (no vtables, no heap boxing, 100% cache-friendly), which is very idiomatic in Rust when the set of database drivers is closed!
+  </Accordion>
+</Accordions>
+
+---
+
+## Complete Solution & Walkthrough
+
+<Tabs items={['Rust', 'C++', 'TypeScript']}>
+  <Tab value="Rust">
+```rust
+pub trait Connection {
+    fn connect(&self);
+    fn close(&self);
+}
+
+pub trait Command {
+    fn execute(&self, sql: &str);
+}
+
+pub struct PgConnection;
+impl Connection for PgConnection {
+    fn connect(&self) { println!("Connecting to Postgres..."); }
+    fn close(&self) { println!("Closing Postgres connection."); }
+}
+
+pub struct PgCommand;
+impl Command for PgCommand {
+    fn execute(&self, sql: &str) { println!("Executing on Postgres: {}", sql); }
+}
+
+pub trait DatabaseFactory {
+    fn create_connection(&self) -> Box<dyn Connection>;
+    fn create_command(&self) -> Box<dyn Command>;
+}
+
+pub struct PostgresFactory;
+impl DatabaseFactory for PostgresFactory {
+    fn create_connection(&self) -> Box<dyn Connection> { Box::new(PgConnection) }
+    fn create_command(&self) -> Box<dyn Command> { Box::new(PgCommand) }
+}
+
+pub fn run_query(factory: &dyn DatabaseFactory, sql: &str) {
+    let conn = factory.create_connection();
+    let cmd = factory.create_command();
+    conn.connect();
+    cmd.execute(sql);
+    conn.close();
+}
+```
+  </Tab>
+
+  <Tab value="C++">
+```cpp
+#include <iostream>
+#include <memory>
+#include <string>
+
+class Connection {
+public:
+    virtual ~Connection() = default;
+    virtual void connect() = 0;
+    virtual void close() = 0;
+};
+
+class Command {
+public:
+    virtual ~Command() = default;
+    virtual void execute(const std::string& sql) = 0;
+};
+
+class PgConnection : public Connection {
+public:
+    void connect() override { std::cout << "Postgres connected\n"; }
+    void close() override { std::cout << "Postgres closed\n"; }
+};
+
+class PgCommand : public Command {
+public:
+    void execute(const std::string& sql) override {
+        std::cout << "Postgres executing: " << sql << "\n";
+    }
+};
+
+class DatabaseFactory {
+public:
+    virtual ~DatabaseFactory() = default;
+    virtual std::unique_ptr<Connection> createConnection() const = 0;
+    virtual std::unique_ptr<Command> createCommand() const = 0;
+};
+
+class PostgresFactory : public DatabaseFactory {
+public:
+    std::unique_ptr<Connection> createConnection() const override {
+        return std::make_unique<PgConnection>();
+    }
+    std::unique_ptr<Command> createCommand() const override {
+        return std::make_unique<PgCommand>();
+    }
+};
+
+void runQuery(const DatabaseFactory& factory, const std::string& sql) {
+    auto conn = factory.createConnection();
+    auto cmd = factory.createCommand();
+    conn->connect();
+    cmd->execute(sql);
+    conn->close();
+}
+```
+  </Tab>
+
+  <Tab value="TypeScript">
+```typescript
+interface Connection {
+  connect(): void;
+  close(): void;
+}
+
+interface Command {
+  execute(sql: string): void;
+}
+
+class PgConnection implements Connection {
+  connect() { console.log("Postgres connected"); }
+  close() { console.log("Postgres closed"); }
+}
+
+class PgCommand implements Command {
+  execute(sql: string) { console.log(`Postgres executing: ${sql}`); }
+}
+
+interface DatabaseFactory {
+  createConnection(): Connection;
+  createCommand(): Command;
+}
+
+class PostgresFactory implements DatabaseFactory {
+  createConnection(): Connection { return new PgConnection(); }
+  createCommand(): Command { return new PgCommand(); }
+}
+
+function runQuery(factory: DatabaseFactory, sql: string) {
+  const conn = factory.createConnection();
+  const cmd = factory.createCommand();
+  conn.connect();
+  cmd.execute(sql);
+  conn.close();
+}
+```
+  </Tab>
+</Tabs>

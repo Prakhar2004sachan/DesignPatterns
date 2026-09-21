@@ -1,0 +1,66 @@
+---
+title: "C++ – Problems & Compiler Errors"
+description: "Compiler errors, linker failures, and runtime issues I hit while implementing design patterns in C++."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+---
+
+## Problem 1 — macOS SDK Linker Mismatch (`arm64e.x1-macos`)
+
+**Symptom**:
+```
+ld: tapi error: malformed file
+/Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk/usr/lib/libSystem.B.tbd:
+error: unknown architecture arm64e.x1-macos
+```
+
+**Root Cause**:  
+When `clang++` runs without `-isysroot`, it defaults to `/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk` (symlinked to a preview `MacOSX27.0.sdk`). That SDK's `.tbd` stubs contain architecture tags (`arm64e.x1-macos`) that the installed Xcode linker cannot parse.
+
+**Fix** (added to all project `Makefile`s and `create-projects.sh`):
+```makefile
+SDKROOT ?= $(shell xcrun --sdk macosx --show-sdk-path 2>/dev/null)
+SYSROOT_FLAG = $(if $(SDKROOT),-isysroot $(SDKROOT),)
+
+CXX ?= clang++
+CXXFLAGS ?= -std=c++20 -Wall -Wextra -O2 $(SYSROOT_FLAG)
+```
+
+<Callout type="info">
+Always use `xcrun --sdk macosx --show-sdk-path` to get the **active Xcode SDK** path. Never rely on the CommandLineTools symlink on macOS 15+.
+</Callout>
+
+---
+
+## Problem 2 — Covariant Return Types: `unique_ptr<Derived>` vs `unique_ptr<Base>`
+
+**Symptom**: Compiler refuses override where derived class tries to return `std::unique_ptr<WordDocument>` from a method declared as `std::unique_ptr<Document>`.
+
+**Root Cause**:  
+C++ covariance only applies to **raw pointers** and **references** (`T*`, `T&`). `std::unique_ptr<Derived>` and `std::unique_ptr<Base>` are completely unrelated template instantiations — the compiler sees no inheritance relationship between them.
+
+**Fix**: Keep the override signature returning `std::unique_ptr<Document>` and use `std::make_unique<WordDocument>()` inside:
+```cpp
+std::unique_ptr<Document> createDocument() const override {
+    return std::make_unique<WordDocument>(); // implicitly converts Derived→Base
+}
+```
+
+---
+
+## Problem 3 — Memory Leak: Missing `virtual` Destructor
+
+**Symptom**: No compile error, but derived class resources leak when deleted through a base pointer.
+
+**Root Cause**:  
+Without `virtual ~Base()`, the linker binds the destructor call at compile time to `Document::~Document()`. The derived class's destructor is **skipped entirely**.
+
+**Fix**:
+```cpp
+class Document {
+public:
+    virtual ~Document() = default; // REQUIRED on any polymorphic base
+};
+```

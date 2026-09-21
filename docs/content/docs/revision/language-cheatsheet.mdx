@@ -1,0 +1,39 @@
+---
+title: Multi-Language Paradigm Cheat Sheet
+description: High-density comparison table of object orientation, dynamic dispatch, memory management, and typing rules across Rust, C++, TypeScript, and JavaScript.
+---
+
+When translating design patterns across languages, use this cheat sheet to quickly map concepts from classic OOP to the idiomatic constructs of each language.
+
+---
+
+## The Core Concept Matrix
+
+| Dimension | Rust | C++20 | 🔷 TypeScript | JavaScript |
+| :--- | :--- | :--- | :--- | :--- |
+| **Class Abstraction** | `trait` (No classes, no inheritance) | `class` with pure virtual methods (`= 0`) | `interface` or `abstract class` | `class` (ES6 syntactic sugar over prototype) |
+| **Dynamic Dispatch** | Trait objects (`dyn Trait` behind `Box` or `&`) | Virtual tables via pointers (`std::unique_ptr<Base>`) | Polymorphic classes or interfaces | Native runtime dynamic method lookup |
+| **Static Dispatch** | Generics + Trait Bounds (`impl Trait`, `<T: Trait>`) | Templates / Concepts (`template <typename T>`) | Generics (`<T extends Base>`) | N/A (dynamic only) |
+| **Object Creation** | Struct expressions / associated functions (`Type::new()`) | `std::make_unique<T>()`, constructors | `new Class()`, factory functions, object literals | `new Class()`, factory closures, object literals |
+| **Memory Model** | Compile-time ownership, Borrow Checker, RAII | Manual RAII via Smart Pointers (`unique_ptr`, `shared_ptr`) | Tracing Garbage Collection (V8 Engine) | Tracing Garbage Collection (V8 Engine) |
+| **Enforcing Contracts** | Compile-time trait check | Compile-time abstract class instantiation block | Compile-time structural type check | Runtime checks (`new.target`, throwing errors) |
+| **Cloning / Copying** | `Clone` / `Copy` traits | Copy constructor / assignment or `clone()` method | `structuredClone()` or custom `.clone()` method | `structuredClone()`, `Object.create()`, spread |
+
+---
+
+## When to Deviate from Classical GoF
+
+### 1. In Rust:
+- **Prefer Enums for Closed Polymorphism**: If you know all 3 or 4 variants (e.g. `enum Event { Click, KeyPress }`), prefer `enum` + `match` over trait objects (`Box<dyn Event>`). It avoids heap allocations and provides exhaustive pattern matching.
+- **Prefer Typestate over Runtime Validation**: For Builders, encode state into types (`Builder<Initial>` $\to$ `Builder<Configured>`).
+
+### 2. In Modern C++:
+- **Never use Raw Owning Pointers**: Never write `Base* b = new Derived(); delete b;`. Always use `std::unique_ptr` or `std::shared_ptr`.
+- **Always Default Destructors**: Declare `virtual ~Base() = default;` on any class with virtual methods.
+
+### 3. In TypeScript:
+- **Prefer Discriminated Unions**: Instead of deep class inheritance trees, use union types with a discriminator key (`type Action = { type: 'ADD' } | { type: 'REMOVE' }`).
+- **Prefer Plain Objects for Configuration**: Use `{ [key: string]: unknown }` and optional parameters rather than heavy builder classes.
+
+### 4. In JavaScript:
+- **Prefer Closures & Higher-Order Functions**: Instead of creating Strategy or Command classes with a single `execute()` method, just pass a function!

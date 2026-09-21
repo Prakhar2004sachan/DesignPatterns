@@ -1,0 +1,815 @@
+---
+title: Factory Method (Original Source)
+description: Raw source document for Factory Method Pattern.
+---
+
+# 03_Factory_Method
+
+Implementations of the **03_Factory_Method** pattern across 4 languages:
+- [Rust](./rs) (`rs`)
+- [JavaScript](./js) (`js`)
+- [TypeScript](./ts) (`ts`)
+- [C++](./cpp) (`cpp`)
+
+---
+
+## Quick Run Guide
+
+### Rust (`rs`)
+```bash
+cd rs
+cargo run
+```
+
+### JavaScript (`js`)
+```bash
+cd js
+npm start
+# or watch mode:
+npm run dev
+```
+
+### 🔷 TypeScript (`ts`)
+```bash
+cd ts
+# Direct run (Node 22 native type stripping):
+npm start
+# or watch mode:
+npm run dev
+```
+
+### C++ (`cpp`)
+```bash
+cd cpp
+# Quick build and run with Makefile:
+make run
+
+# Or with CMake:
+cmake -B build && cmake --build build && ./build/p_03_Factory_Method
+```
+
+# Factory Method
+
+## 1. Intent
+
+Define an interface for creating **a single object**, but let **subclasses or implementations decide which concrete class to instantiate**. Factory Method defers instantiation to the subclass/implementor.
+
+In plain terms: the parent class says *"I need a product, but I won't decide which one — my subclass will."* The parent orchestrates; the subclass supplies the concrete piece.
+
+---
+
+## 2. The Problem It Solves
+
+### Problem A — Direct instantiation couples you to a concrete class
+
+```cpp
+class DocumentEditor {
+    void open() {
+        auto doc = new WordDocument();  // hard-coded!
+    }
+};
+```
+
+If you later want `PdfDocument` or `MarkdownDocument`, you must edit `DocumentEditor`. That violates Open/Closed.
+
+### Problem B — You don't know the concrete type until runtime
+
+A framework provides the flow, but the application decides the concrete type. For example, a game framework knows how to spawn enemies, but each game defines what an "enemy" is.
+
+### Problem C — You want to reuse the same algorithm with different products
+
+The algorithm (open → edit → save) is identical; only the document format differs. Factory Method lets you plug in the product without touching the algorithm.
+
+### Problem D — Testing requires swapping implementations
+
+In tests you want a `MockDocument` instead of a real one. Factory Method makes the product replaceable without editing the client.
+
+---
+
+## 3. Factory Method vs Abstract Factory vs Builder
+
+This is the most confused trio in GoF. Clarify it once:
+
+| Pattern | Creates | Decided by | Focus |
+|---|---|---|---|
+| **Factory Method** | **One** product | Subclass / implementor | *Which* concrete class to instantiate |
+| **Abstract Factory** | **A family** of products | Concrete factory object | *Which family* of related objects |
+| **Builder** | **One complex** object | Builder + step sequence | *How* to assemble the parts |
+
+**Rule of thumb:**
+- One product, deferred decision → Factory Method.
+- Multiple related products, chosen together → Abstract Factory.
+- One complex object, built step by step → Builder.
+
+Note that Abstract Factory is often *implemented using* Factory Methods — each `createX()` on the factory is a Factory Method. So they're not rivals; they compose.
+
+---
+
+## 4. Structure — Classic GoF
+
+```
+        ┌────────────────────┐
+        │      Creator       │
+        │                    │
+        │ +someOperation()   │──── uses ────┐
+        │ +factoryMethod()   │              │
+        └─────────┬──────────┘              ▼
+                  │                  ┌─────────────┐
+       ┌──────────┴──────────┐       │   Product   │
+       │                     │       │ (interface) │
+ConcreteCreatorA      ConcreteCreatorB└──────┬──────┘
+       │                     │               │
+       ▼                     ▼        ┌──────┴───────┐
+  ConcreteProductA     ConcreteProductB            ...
+```
+
+| Role | Responsibility |
+|---|---|
+| **Product** | Interface for objects the factory method creates. |
+| **Concrete Product** | A specific implementation of `Product`. |
+| **Creator** | Declares the factory method (often abstract), and contains business logic that uses products. |
+| **Concrete Creator** | Overrides the factory method to return a specific concrete product. |
+
+**Key point:** the Creator contains **real logic** that operates on the Product. It's not just a factory — it's a class with a job that happens to need a product. This is what distinguishes Factory Method from a plain factory function.
+
+---
+
+## 5. Structure — Simple Factory (the non-GoF variant)
+
+A common simplification: a single class (or function) with a `switch`/`match` that returns different products. This is **not** the GoF Factory Method (no subclassing), but it's what many people mean when they say "factory."
+
+```
+createDocument(type) {
+  switch (type) {
+    case "word":     return new WordDocument();
+    case "pdf":      return new PdfDocument();
+    case "markdown": return new MarkdownDocument();
+  }
+}
+```
+
+**Trade-off:** adding a new product means editing the `switch`. GoF Factory Method avoids this by moving the decision into a subclass. Simple Factory is fine when the product set is small and stable.
+
+---
+
+## 6. Structure — Factory Method via functions (modern variant)
+
+In languages with first-class functions, the "factory method" is often just **a function value** passed in:
+
+```js
+function processDocument(createDoc) {
+  const doc = createDoc();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
+processDocument(() => new WordDocument());
+processDocument(() => new PdfDocument());
+```
+
+Same idea — defer instantiation to the caller — without a class hierarchy. This is the modern, lightweight form.
+
+---
+
+## 7. Rust Implementation
+
+Rust has no inheritance, so "subclass decides" becomes "trait implementation decides." There are three idioms, from most dynamic to most static.
+
+### 7a. Trait object with a factory method
+
+The Creator is a trait with a required method that returns `Box<dyn Product>`:
+
+```rust
+trait Document {
+    fn open(&self);
+    fn edit(&self);
+    fn save(&self);
+}
+
+struct WordDocument;
+impl Document for WordDocument {
+    fn open(&self) { println!("Word: open"); }
+    fn edit(&self) { println!("Word: edit"); }
+    fn save(&self) { println!("Word: save"); }
+}
+
+struct PdfDocument;
+impl Document for PdfDocument {
+    fn open(&self) { println!("PDF: open"); }
+    fn edit(&self) { println!("PDF: edit"); }
+    fn save(&self) { println!("PDF: save"); }
+}
+
+// Creator — has real logic plus a factory method
+trait DocumentEditor {
+    fn create_document(&self) -> Box<dyn Document>;
+
+    // real algorithm that uses the product
+    fn run(&self) {
+        let doc = self.create_document();
+        doc.open();
+        doc.edit();
+        doc.save();
+    }
+}
+
+struct WordEditor;
+impl DocumentEditor for WordEditor {
+    fn create_document(&self) -> Box<dyn Document> {
+        Box::new(WordDocument)
+    }
+}
+
+struct PdfEditor;
+impl DocumentEditor for PdfEditor {
+    fn create_document(&self) -> Box<dyn Document> {
+        Box::new(PdfDocument)
+    }
+}
+
+fn main() {
+    let editor: Box<dyn DocumentEditor> = Box::new(PdfEditor);
+    editor.run();
+}
+```
+
+Note how `run()` — the business logic — lives in the trait's **default method**. Subclasses only override `create_document`. This is exactly the GoF structure.
+
+### 7b. Generic (static dispatch) — the idiomatic Rust version
+
+Avoid `Box<dyn ...>` by making the Creator generic over the Product:
+
+```rust
+trait Document {
+    fn open(&self);
+    fn edit(&self);
+    fn save(&self);
+}
+
+struct WordDocument;
+impl Document for WordDocument {
+    fn open(&self) { println!("Word: open"); }
+    fn edit(&self) { println!("Word: edit"); }
+    fn save(&self) { println!("Word: save"); }
+}
+
+struct PdfDocument;
+impl Document for PdfDocument {
+    fn open(&self) { println!("PDF: open"); }
+    fn edit(&self) { println!("PDF: edit"); }
+    fn save(&self) { println!("PDF: save"); }
+}
+
+struct Editor<D: Document> {
+    document: D, // or a constructor closure
+}
+
+impl<D: Document> Editor<D> {
+    fn new(document: D) -> Self {
+        Editor { document }
+    }
+
+    fn run(&self) {
+        self.document.open();
+        self.document.edit();
+        self.document.save();
+    }
+}
+
+fn main() {
+    Editor::new(PdfDocument).run();
+    Editor::new(WordDocument).run();
+}
+```
+
+No heap, no vtable — the compiler monomorphizes. This is Rust's preferred form when the product is known at compile time.
+
+### 7c. Factory as a function value
+
+The lightest form: pass a closure that produces the product.
+
+```rust
+trait Document {
+    fn open(&self);
+    fn edit(&self);
+}
+
+fn run_editor<F, D>(create: F)
+where
+    F: Fn() -> D,
+    D: Document,
+{
+    let doc = create();
+    doc.open();
+    doc.edit();
+}
+
+fn main() {
+    run_editor(|| WordDocument);
+    run_editor(|| PdfDocument);
+}
+```
+
+This is the Rust analogue of the JS function-value form. Great for testing (pass a closure returning a mock).
+
+### Rust notes
+
+- Prefer generics + trait bounds over `Box<dyn Trait>` when the type is known statically.
+- Use `Box<dyn Trait>` when you need heterogeneous collections or runtime choice.
+- Factory methods returning `Self` or associated types are common in the standard library (`Default::default`, `From::from`, `Iterator::collect`, `parse`).
+- `Default` is the simplest Factory Method in the language — you override `default()` per type.
+
+---
+
+## 8. C++ Implementation
+
+C++ has classical inheritance, so the GoF version is direct.
+
+### 8a. Classic GoF
+
+```cpp
+#include <iostream>
+#include <memory>
+
+class Document {
+public:
+    virtual ~Document() = default;
+    virtual void open() const = 0;
+    virtual void edit() const = 0;
+    virtual void save() const = 0;
+};
+
+class WordDocument : public Document {
+public:
+    void open() const override { std::cout << "Word: open\n"; }
+    void edit() const override { std::cout << "Word: edit\n"; }
+    void save() const override { std::cout << "Word: save\n"; }
+};
+
+class PdfDocument : public Document {
+public:
+    void open() const override { std::cout << "PDF: open\n"; }
+    void edit() const override { std::cout << "PDF: edit\n"; }
+    void save() const override { std::cout << "PDF: save\n"; }
+};
+
+// Creator
+class DocumentEditor {
+public:
+    virtual ~DocumentEditor() = default;
+
+    // factory method
+    virtual std::unique_ptr<Document> createDocument() const = 0;
+
+    // template method — real logic using the product
+    void run() const {
+        auto doc = createDocument();
+        doc->open();
+        doc->edit();
+        doc->save();
+    }
+};
+
+class WordEditor : public DocumentEditor {
+public:
+    std::unique_ptr<Document> createDocument() const override {
+        return std::make_unique<WordDocument>();
+    }
+};
+
+class PdfEditor : public DocumentEditor {
+public:
+    std::unique_ptr<Document> createDocument() const override {
+        return std::make_unique<PdfDocument>();
+    }
+};
+
+int main() {
+    std::unique_ptr<DocumentEditor> editor = std::make_unique<PdfEditor>();
+    editor->run();
+}
+```
+
+Notice the synergy with **Template Method**: `run()` is a template method (defines the skeleton), and `createDocument()` is the factory method (the hook the subclass fills in). GoF explicitly says Factory Method is often a specialization of Template Method.
+
+### 8b. Function-pointer / std::function variant
+
+If you don't want a class hierarchy:
+
+```cpp
+#include <functional>
+
+void runEditor(const std::function<std::unique_ptr<Document>()>& create) {
+    auto doc = create();
+    doc->open();
+    doc->edit();
+    doc->save();
+}
+
+int main() {
+    runEditor([] { return std::make_unique<WordDocument>(); });
+    runEditor([] { return std::make_unique<PdfDocument>(); });
+}
+```
+
+This is the C++ analogue of the Rust closure form and the JS function-value form.
+
+### 8c. Policy-based template (compile-time)
+
+For zero-overhead:
+
+```cpp
+template <typename Doc>
+void runEditor() {
+    Doc doc;
+    doc.open();
+    doc.edit();
+    doc.save();
+}
+
+runEditor<WordDocument>();
+runEditor<PdfDocument>();
+```
+
+### C++ notes
+
+- Return `std::unique_ptr<Product>` — ownership is clear.
+- Always declare a virtual destructor on polymorphic bases.
+- Factory Method is frequently combined with **Template Method** (Creator's algorithm) and **Prototype** (when products clone themselves).
+- `std::function` is convenient but has overhead; templates are zero-cost.
+
+---
+
+## 9. JavaScript Implementation
+
+JS has no inheritance requirement — the factory method is often just a function or a method that returns an object.
+
+### 9a. Class-based (GoF-shaped)
+
+```js
+class Document {
+  open() { throw new Error("abstract open"); }
+  edit() { throw new Error("abstract edit"); }
+  save() { throw new Error("abstract save"); }
+}
+
+class WordDocument extends Document {
+  open() { console.log("Word: open"); }
+  edit() { console.log("Word: edit"); }
+  save() { console.log("Word: save"); }
+}
+
+class PdfDocument extends Document {
+  open() { console.log("PDF: open"); }
+  edit() { console.log("PDF: edit"); }
+  save() { console.log("PDF: save"); }
+}
+
+class DocumentEditor {
+  createDocument() { throw new Error("abstract createDocument"); }
+
+  run() {
+    const doc = this.createDocument();
+    doc.open();
+    doc.edit();
+    doc.save();
+  }
+}
+
+class WordEditor extends DocumentEditor {
+  createDocument() { return new WordDocument(); }
+}
+
+class PdfEditor extends DocumentEditor {
+  createDocument() { return new PdfDocument(); }
+}
+
+new PdfEditor().run();
+```
+
+### 9b. Function-value form (idiomatic modern JS)
+
+```js
+function runEditor(createDocument) {
+  const doc = createDocument();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
+runEditor(() => new WordDocument());
+runEditor(() => new PdfDocument());
+```
+
+Or with plain objects (no classes at all):
+
+```js
+const wordDocument = () => ({
+  open: () => console.log("Word: open"),
+  edit: () => console.log("Word: edit"),
+  save: () => console.log("Word: save"),
+});
+
+const pdfDocument = () => ({
+  open: () => console.log("PDF: open"),
+  edit: () => console.log("PDF: edit"),
+  save: () => console.log("PDF: save"),
+});
+
+function runEditor(createDocument) {
+  const doc = createDocument();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
+runEditor(pdfDocument);
+```
+
+### 9c. Simple Factory (very common in JS)
+
+```js
+function createDocument(type) {
+  switch (type) {
+    case "word": return new WordDocument();
+    case "pdf":  return new PdfDocument();
+    default: throw new Error(`Unknown type: ${type}`);
+  }
+}
+```
+
+Common but not GoF. Adding a type requires editing this function.
+
+### JS notes
+
+- Functions are the cheapest factory — use them unless you need the class hierarchy.
+- A "factory method" on a class is just a method that returns an object; there's no compile-time contract.
+- Watch for `this` when returning arrow functions vs regular functions.
+
+---
+
+## 10. TypeScript Implementation
+
+TypeScript can express every variant of Factory Method: abstract class, interface, function value, and generic.
+
+### 10a. Abstract class version (GoF-shaped)
+
+```ts
+abstract class Document {
+  abstract open(): void;
+  abstract edit(): void;
+  abstract save(): void;
+}
+
+class WordDocument extends Document {
+  open() { console.log("Word: open"); }
+  edit() { console.log("Word: edit"); }
+  save() { console.log("Word: save"); }
+}
+
+class PdfDocument extends Document {
+  open() { console.log("PDF: open"); }
+  edit() { console.log("PDF: edit"); }
+  save() { console.log("PDF: save"); }
+}
+
+abstract class DocumentEditor {
+  protected abstract createDocument(): Document;
+
+  run(): void {
+    const doc = this.createDocument();
+    doc.open();
+    doc.edit();
+    doc.save();
+  }
+}
+
+class WordEditor extends DocumentEditor {
+  protected createDocument(): Document { return new WordDocument(); }
+}
+
+class PdfEditor extends DocumentEditor {
+  protected createDocument(): Document { return new PdfDocument(); }
+}
+
+new PdfEditor().run();
+```
+
+### 10b. Interface + generic Creator
+
+```ts
+interface Document {
+  open(): void;
+  edit(): void;
+  save(): void;
+}
+
+class WordDocument implements Document {
+  open() { console.log("Word: open"); }
+  edit() { console.log("Word: edit"); }
+  save() { console.log("Word: save"); }
+}
+
+interface Creator<T extends Document> {
+  create(): T;
+}
+
+function runEditor<T extends Document>(creator: Creator<T>): void {
+  const doc = creator.create();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
+runEditor({ create: () => new WordDocument() });
+```
+
+The generic `<T extends Document>` gives you the precise concrete type back — useful when the caller needs both the base contract and the concrete type.
+
+### 10c. Function-value form (idiomatic)
+
+```ts
+type DocumentFactory = () => Document;
+
+function runEditor(createDocument: DocumentFactory): void {
+  const doc = createDocument();
+  doc.open();
+  doc.edit();
+  doc.save();
+}
+
+runEditor(() => new WordDocument());
+runEditor(() => new PdfDocument());
+```
+
+This is the most concise and, in most TS codebases, the preferred form.
+
+### 10d. Discriminated union form (TS-native)
+
+When the product set is closed, TS prefers a discriminated union over classes:
+
+```ts
+type Document =
+  | { kind: "word"; open(): void; edit(): void; save(): void }
+  | { kind: "pdf";  open(): void; edit(): void; save(): void };
+
+function createDocument(kind: "word" | "pdf"): Document {
+  switch (kind) {
+    case "word": return { kind: "word", open() {}, edit() {}, save() {} };
+    case "pdf":  return { kind: "pdf",  open() {}, edit() {}, save() {} };
+  }
+}
+```
+
+The compiler enforces exhaustiveness. Adding `"markdown"` to the union forces you to handle it.
+
+### TS notes
+
+- Use `abstract class` when you want shared code in the Creator's algorithm.
+- Use `interface` + generic when you want purely structural typing.
+- Use a function type (`() => Product`) when there's no state.
+- Use discriminated unions when the product set is closed — this is the modern TS idiom.
+- `satisfies` can validate a factory object without widening its type.
+
+---
+
+## 11. Side-by-Side Comparison
+
+| Concern | Rust | C++ | JS | TypeScript |
+|---|---|---|---|---|
+| **GoF form** | `trait` with factory method + default `run()` | pure virtual base + virtual factory | class method returning product | `abstract class` or `interface` |
+| **Static form** | generic `<D: Document>` | template `<typename Doc>` | N/A | generic `<T extends Document>` |
+| **Function-value form** | closure `Fn() -> D` | `std::function<...>` or lambda | arrow function | typed function |
+| **Dispatch** | static (generics) or dynamic (`dyn`) | static (templates) or dynamic (`virtual`) | dynamic | dynamic (JS) or static (generics) |
+| **Heap allocation** | only with `Box` | only with `unique_ptr` | always (GC) | always (GC) |
+| **Compile-time safety** | strong | strong | none | strong |
+| **Closed-set idiom** | `enum` + `match` | variant + visitor | object map | discriminated union |
+| **Testing hook** | pass closure / mock trait | inject mock via `std::function` | pass mock function | pass mock function |
+
+---
+
+## 12. Tradeoffs
+
+**Pros**
+
+- Decouples the Creator's logic from concrete Products.
+- Honors Open/Closed for **new products**: add a new subclass, no edits to existing code.
+- Enables testing: swap in mocks by providing a different factory.
+- Composes cleanly with Template Method (Creator's algorithm) and Abstract Factory (family creation).
+- In Rust/TS, can be entirely compile-time with zero dynamic dispatch.
+
+**Cons**
+
+- Requires a class/subclass hierarchy in the classic form — heavy for small cases.
+- In the Simple Factory variant, adding a product requires editing the factory (Open/Closed violated).
+- Adds indirection: reading the code, you must find which subclass is instantiated.
+- In Rust, `Box<dyn Trait>` costs a heap allocation + vtable dispatch; generics monomorphize (code bloat) but are fast.
+- If the product set is closed, a `switch`/`match`/discriminated union is simpler.
+
+**When to use**
+
+- A class cannot anticipate the type of object it must create.
+- A class wants its subclasses to specify what it creates.
+- You want to localize knowledge of which concrete class is used.
+- The product has real behavior (not just data) and the Creator has real logic.
+
+**When NOT to use**
+
+- Product set is tiny and stable → Simple Factory or direct instantiation.
+- You need a family of products → Abstract Factory.
+- You need to build one complex object step by step → Builder.
+- In Rust/TS, if the set is closed, prefer `enum`/`match` or a discriminated union.
+
+---
+
+## 13. Alternatives
+
+| Alternative | When it's better |
+|---|---|
+| **Simple Factory (switch)** | Small closed set of products, no subclassing. |
+| **Abstract Factory** | Multiple related products forming a family. |
+| **Builder** | One complex object, step-by-step construction. |
+| **Prototype** | Clone a configured object instead of constructing new. |
+| **Dependency Injection** | Product is supplied externally, no factory needed. |
+| **Discriminated union + `match`** (Rust/TS) | Closed set of products, compile-time exhaustiveness. |
+| **Function value / closure** | No state or hierarchy needed; simplest form. |
+| **`Default` trait (Rust)** | Simple no-arg construction with overridable behavior. |
+
+---
+
+## 14. Relationship to Other Patterns
+
+Factory Method is a **connective tissue** pattern. It appears inside other patterns:
+
+- **Abstract Factory** — each `createX()` is a Factory Method.
+- **Template Method** — the Creator's algorithm is a template method; the factory method is its hook.
+- **Iterator** — `iterator()` is a factory method returning an `Iterator` product.
+- **Prototype** — a factory method may clone instead of construct.
+- **Singleton** — the factory method returns the single instance.
+- **Strategy** — the strategy is often produced by a factory method.
+
+Recognizing Factory Method inside these makes the whole catalog cohere.
+
+---
+
+## 15. Mental Model
+
+> **Factory Method** = "I know **what** to do with the product, but **you** (subclass/implementor/caller) decide **which** product."
+
+If you see:
+
+```cpp
+if (type == "word") doc = new WordDocument();
+else if (type == "pdf") doc = new PdfDocument();
+```
+
+scattered around business logic, a Factory Method wants to be born.
+
+If you see a `Creator` with a `createX()` method and a `run()` that uses it, you're already looking at one.
+
+---
+
+## 16. Exercise
+
+Build a **Factory Method for a logging system** in **Rust, C++, JavaScript, and TypeScript**.
+
+**Products — `Logger` with:**
+
+- `log(level, message)` — write a log entry.
+- `close()` — flush and release resources.
+
+**Concrete products:**
+
+- `ConsoleLogger` — prints to stdout.
+- `FileLogger` — writes to a file path given at construction.
+- `NullLogger` — discards everything (useful for tests).
+
+**Creator — `Application` with:**
+
+- A factory method `createLogger(): Logger`.
+- Real logic `run()` that: creates a logger, logs a startup message, performs some work, logs a shutdown message, closes the logger.
+
+**Requirements:**
+
+1. In the classic form, implement `ConsoleApp`, `FileApp`, `NullApp` subclasses that override the factory method.
+2. The `run()` algorithm must not change between subclasses — only `createLogger()` differs.
+3. Provide a **second, functional form** in each language where the factory is a function/closure passed into `run(createLogger)`.
+
+**Language-specific requirements:**
+
+- **Rust:** implement the classic form with `Box<dyn Logger>` and the static form with generics. Which feels more natural? Also implement `Default` on a `Logger` to show the simplest Factory Method in the language.
+- **C++:** implement the classic form with `std::unique_ptr`. Then a `std::function` variant. Note how the destructor of the base class matters.
+- **JavaScript:** implement one class-based version and one function-value version. Which is shorter? Which is more flexible?
+- **TypeScript:** implement an `abstract class` version, an `interface` + generic version, and a discriminated-union version where the logger kind is `"console" | "file" | "null"`. Compare compile-time safety and line count.
+
+**Then answer:**
+
+1. In the classic form, where does the "decision" of which logger to use live? In the client? In the Creator? In the subclass?
+2. If you add a `CloudLogger`, which files must change in the classic form? In the function-value form? In the discriminated-union form?
+3. How does `NullLogger` improve testability compared to conditional logging?
+4. How does this pattern relate to **Template Method**? Point to the exact line where the two overlap.
+
+---
+
+Say **"next"** when you're ready for **Prototype** — the next Creational pattern — or **"review Factory Method"** to walk through the exercise.

@@ -1,0 +1,270 @@
+---
+title: Active Recall Flashcards
+description: Test yourself on design patterns and language-specific gotchas. Try answering before revealing — that's what builds memory.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+> Click to reveal. Try answering first — this is **active recall**, not passive reading.
+
+---
+
+## Pattern Core Concepts
+
+<Accordions>
+  <Accordion title="❓ What is the single biggest difference between Factory Method and Abstract Factory?">
+
+**Factory Method** — one Creator, one product, one factory method. Subclass decides which concrete product.
+
+**Abstract Factory** — one factory interface, a whole **family** of products (e.g. Button + Checkbox + Window). Guarantees all products in the family are compatible with each other.
+
+Rule of thumb: if you're creating **one thing** → FM. If you're creating **a related set of things** → AF.
+  </Accordion>
+
+  <Accordion title="❓ What is the sign that you're doing DI, not Factory Method?">
+
+If `main()` (or the caller) is the one writing `new PdfDocument()` and passing it in → **Dependency Injection**.
+
+In **Factory Method**, the Creator (`PdfEditor`) creates the product internally in its `create_document()` method. The caller only chooses which Creator to instantiate.
+  </Accordion>
+
+  <Accordion title="❓ When should you use Builder instead of Factory Method?">
+
+Use **Builder** when:
+1. Construction has many optional parameters or multi-step assembly.
+2. The object must never exist in a half-initialized state.
+3. Different parameter combinations produce different representations.
+
+**Factory Method** creates with one call. **Builder** assembles in steps.
+  </Accordion>
+
+  <Accordion title="❓ When is Prototype better than Builder or Factory?">
+
+When creating a new object from scratch is **expensive** (disk I/O, network, complex initialization), or when you need many instances that share 95% of the same state with small variations.
+
+Prototype clones a pre-configured object rather than re-building from scratch each time.
+  </Accordion>
+</Accordions>
+
+---
+
+## Rust Drills
+
+<Accordions>
+  <Accordion title="❓ Why can't you do 'trait Prototype: Clone' with Box&lt;dyn Prototype&gt;?">
+
+`Clone` defines `fn clone(&self) -> Self`. Returning `Self` by value requires knowing the size of the concrete type at compile time. Behind `dyn Trait`, the concrete type is erased — so `Self: Sized` cannot be guaranteed.
+
+**Fix**: define `fn clone_box(&self) -> Box<dyn Prototype>`. `Box<T>` is always pointer-sized, so it's object-safe.
+  </Accordion>
+
+  <Accordion title="❓ Why do you need fn run_editor&lt;F, D&gt; with TWO generics for a closure parameter?">
+
+Every closure in Rust has a **unique, anonymous, compiler-generated type** — even two closures with identical bodies have different types. You can't name that type.
+
+`<F>` captures the unique closure type. `<D: Document>` captures the concrete product type. Together they let the compiler monomorphize a concrete, zero-overhead version of the function for each usage.
+  </Accordion>
+
+  <Accordion title="❓ What is the difference between run_editor(PdfDocument) and run_editor(|| PdfDocument)?">
+
+- `run_editor(PdfDocument)` — passes the **value** (already-created document). Won't match `F: Fn() -> D`.
+- `run_editor(|| PdfDocument)` — passes a **factory closure** that creates a new `PdfDocument` when called.
+
+`||` is the zero-argument closure syntax. The `||` is the empty parameter list.
+  </Accordion>
+
+  <Accordion title="❓ enum dispatch vs Box&lt;dyn Trait&gt; in Rust — when to use which?">
+
+| | `enum + match` | `Box<dyn Trait>` |
+| :-- | :-- | :-- |
+| **Family set** | Closed (known at compile time) | Open (added at runtime) |
+| **Heap alloc** | None | Yes |
+| **Speed** | Zero-cost | Virtual dispatch |
+| **Adding variant** | Breaks all match arms (forced update) | Just `impl Trait for NewType` |
+
+Use `enum` when you know all variants upfront. Use `dyn` when you need extensibility.
+  </Accordion>
+
+  <Accordion title="❓ What is the Typestate Pattern in Rust and how does it apply to Builders?">
+
+The **Typestate Pattern** encodes the current state of a value into its **type parameters** using zero-sized marker types. Methods are only `impl`'d for the type state where preconditions are met:
+
+```rust
+struct Builder<State>(PhantomData<State>);
+struct NoHost;
+struct HasHost;
+
+impl Builder<NoHost> {
+    fn host(self, h: &str) -> Builder<HasHost> { ... }
+}
+
+impl Builder<HasHost> {
+    fn build(self) -> Server { ... } // only callable after .host()
+}
+```
+
+Forgetting `.host()` and calling `.build()` → **compile error**, not runtime error.
+  </Accordion>
+</Accordions>
+
+---
+
+## C++ Drills
+
+<Accordions>
+  <Accordion title="❓ What happens if you forget 'virtual' on the destructor?">
+
+Deleting a derived object through a base pointer **skips the derived destructor**:
+
+```cpp
+Document* doc = new WordDocument();
+delete doc; // Only ~Document() called, ~WordDocument() skipped → leak
+```
+
+No compiler error, no warning (without `-Wnon-virtual-dtor`). Completely silent.
+
+**Rule**: Any class used polymorphically (via pointer/reference) MUST have `virtual ~ClassName() = default`.
+  </Accordion>
+
+  <Accordion title="❓ What does '= 0' do in a method declaration?">
+
+Marks the method as **pure virtual** — the base class provides no implementation. Combined effect:
+1. Forces all concrete subclasses to provide their own implementation.
+2. Makes the **entire class abstract** — you cannot instantiate it: `Document d;` is a compile error.
+  </Accordion>
+
+  <Accordion title="❓ Why pass std::function by const& instead of by value?">
+
+`std::function` uses **Small Buffer Optimization (SBO)** — lambdas that don't fit (~32 bytes) trigger an internal heap allocation. Copying an `std::function` by value copies the captured state and potentially re-allocates on the heap. Passing by `const&` avoids both.
+  </Accordion>
+
+  <Accordion title="❓ Why did the macOS linker fail with 'arm64e.x1-macos'?">
+
+Without `-isysroot`, `clang++` uses the CommandLineTools SDK (symlinked to a preview `MacOSX27.0.sdk`). That SDK's `.tbd` stubs contain an architecture tag (`arm64e.x1-macos`) the installed Xcode linker cannot parse.
+
+**Fix**: always force `-isysroot $(xcrun --sdk macosx --show-sdk-path)` in the Makefile.
+  </Accordion>
+
+  <Accordion title="❓ Can you return unique_ptr&lt;Derived&gt; from an override declared to return unique_ptr&lt;Base&gt;?">
+
+**No**. C++ covariant return types work for raw pointers (`Derived*` → `Base*`) but NOT for smart pointers. `unique_ptr<Derived>` and `unique_ptr<Base>` are unrelated template instantiations — no inheritance between them.
+
+Override must declare the same return type (`unique_ptr<Base>`) and use `make_unique<Derived>()` inside:
+```cpp
+std::unique_ptr<Document> createDocument() const override {
+    return std::make_unique<WordDocument>(); // implicit base-class conversion
+}
+```
+  </Accordion>
+</Accordions>
+
+---
+
+## TypeScript Drills
+
+<Accordions>
+  <Accordion title="❓ What does (typeof Method)[keyof typeof Method] produce?">
+
+```typescript
+const Method = { GET: "GET", POST: "POST" } as const;
+type Method = (typeof Method)[keyof typeof Method];
+// → "GET" | "POST"
+```
+
+Step by step:
+1. `typeof Method` → the type of the object `{ GET: "GET", POST: "POST" }`
+2. `keyof typeof Method` → `"GET" | "POST"` (union of keys)
+3. Index into step 1 with step 2 → `"GET" | "POST"` (the values)
+
+This is the canonical way to get a string union from a `const` object in TypeScript.
+  </Accordion>
+
+  <Accordion title="❓ What does 'declare protected' do in a TypeScript class? Why not just 'protected'?">
+
+`declare` means: **emit zero JavaScript**. The property exists only at the type-checker level.
+
+```typescript
+declare protected readonly _has: (has: Has) => void;
+```
+
+Without `declare`, TypeScript emits `this._has = undefined` in the constructor — a wasted runtime property. With `declare`, it's purely a phantom type anchor. Zero runtime cost.
+  </Accordion>
+
+  <Accordion title="❓ Why is 'this as unknown as T' needed instead of 'this as T' in the typestate builder?">
+
+TypeScript rejects `this as SafeHttpRequestBuilder<Has | 'method'>` because it can't verify structural assignability between generic instantiations with different type parameters.
+
+`as unknown` is a type-safe escape: `unknown` is assignable to anything and from anything. Chaining `as unknown as T` explicitly says "I know what I'm doing, cross the type boundary intentionally."
+  </Accordion>
+
+  <Accordion title="❓ What is structural typing and why does it matter for Factory Method in TypeScript?">
+
+TypeScript checks **shape** (method names + signatures), not class names or `implements` declarations.
+
+```typescript
+runEditor({ create: () => new WordDocument() }); // 
+```
+
+This works with no class, no `implements`, no `extends`. Any object with a matching `create` method satisfies the interface. This makes TypeScript factory patterns much more flexible than Java/C# equivalents.
+  </Accordion>
+
+  <Accordion title="❓ interface vs type — when to use which in TypeScript?">
+
+**Use `interface` when**:
+- You're defining a contract for an object or class (can be `implements`'d)
+- You need declaration merging (multiple `interface Foo` definitions get merged)
+- The shape is fixed and hierarchical
+
+**Use `type` when**:
+- You need a union: `type Result = Success | Error`
+- You need a mapped type, conditional type, or template literal type
+- You're aliasing a primitive: `type ID = string`
+
+In practice: `interface` for object shapes, `type` for everything else.
+  </Accordion>
+
+  <Accordion title="❓ Why does Record&lt;string, string&gt; not work for HTTP headers?">
+
+HTTP headers can have **multiple values** for the same key: `Accept: text/html, application/json`.
+
+`Record<string, string>` only allows a single `string` value per key. The correct type:
+```typescript
+type HeaderValue = string | readonly string[];
+readonly headers: Readonly<Record<string, HeaderValue>>;
+```
+
+`readonly string[]` prevents mutating the array. `Readonly<Record<...>>` prevents adding/removing keys. `Object.freeze(this)` enforces this at runtime (TypeScript `readonly` is compile-time only).
+  </Accordion>
+</Accordions>
+
+---
+
+## JavaScript Drills
+
+<Accordions>
+  <Accordion title="❓ Why throw in a base class method instead of leaving it empty?">
+
+Empty base method → silently returns `undefined` → crash happens downstream with a confusing `TypeError: Cannot read properties of undefined`. 
+
+`throw new Error('Abstract: override required')` → crash happens immediately at the unoverridden method call site, with a meaningful message.
+  </Accordion>
+
+  <Accordion title="❓ What does new.target do and how do you use it to prevent abstract class instantiation?">
+
+`new.target` refers to the class that was directly `new`'d:
+
+```javascript
+class Document {
+  constructor() {
+    if (new.target === Document) {
+      throw new Error("Document is abstract — use WordDocument or PdfDocument");
+    }
+  }
+}
+```
+
+In `new WordDocument()`, `new.target` is `WordDocument` → check passes.
+In `new Document()`, `new.target` is `Document` → throws immediately.
+  </Accordion>
+</Accordions>

@@ -1,0 +1,98 @@
+---
+title: "TypeScript – Problems & Type Errors"
+description: "Type errors, overload mismatches, and structural typing confusions I hit in TypeScript."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+---
+
+## Problem 1 — Builder Exercise: Interface Not Satisfied & Syntax Errors
+
+**Symptom**: Fixing the Builder in `02_Builder_Exercise/ts/src/index.ts` to match the README specification.
+
+### What Was Broken
+1. **Syntax Errors & Options Contract**:
+   - The initial file had empty type slots (`body?: ;`, `headers?: ;`) and mixed up builder method signatures with data option properties.
+   - Fixed by defining `HttpRequestOptions` for the plain data payload and `HttpRequest` with immutable `readonly` fields frozen at runtime with `Object.freeze()`.
+
+2. **Enum & Node 22 Strip-Types Incompatibility**:
+   - TypeScript `enum Method { ... }` threw `SyntaxError: TypeScript enum is not supported in strip-only mode` under Node 22's `--experimental-strip-types`.
+   - Replaced with an idiomatic `const Method = { ... } as const` + `type Method = (typeof Method)[keyof typeof Method]`. This preserves autocomplete (`Method.GET`), runtime values, and strict compile-time types without generating runtime helper functions.
+
+3. **Implemented All 3 TypeScript Builders**:
+   - **Interface-based Fluent Builder** (`HttpRequestBuilder`, `DefaultHttpRequestBuilder`): Chainable methods, defaults (`timeoutMs = 30_000`, `followRedirects = true`, `headers = {}`), and runtime validation throwing if `method` or `url` are omitted.
+   - **Closure-based Builder using `satisfies`** (`createHttpRequestBuilder`): Encapsulates state via a local closure rather than class fields, satisfying `HttpRequestBuilder`.
+   - **Compile-time Typestate Builder** (`SafeHttpRequestBuilder<Has extends string = never>`): Uses phantom types and conditional `this` parameter typing so `.build()` is literally uncallable until both `method` and `url` have been called.
+
+---
+
+## Problem 2 — Overload Mismatch with `Readonly<Record<string, HeaderValue>>`
+
+**Symptom**:
+```text
+No overload matches this call.
+  Overload 1 of 2, '(o: {}): string[]', gave the following error.
+    Argument of type 'Readonly<Record<string, HeaderValue>>' is not assignable to parameter of type '{}'.
+```
+
+### Root Cause
+When calling `Object.keys()` or `Object.entries()` on an object typed with `Readonly<Record<string, HeaderValue>>`, TypeScript selects the `{}` overload instead of dictionary index signature.
+
+### Fix
+Cast through the dictionary type:
+```typescript
+Object.entries(this.headers as Record<string, HeaderValue>)
+```
+Or use a typed helper:
+```typescript
+function getHeaderEntries<T extends object>(obj: T): [keyof T, T[keyof T]][] {
+  return Object.entries(obj) as any;
+}
+```
+
+---
+
+## Problem 3 — Double Cast Requirement: `this as unknown as SafeHttpRequestBuilder<...>`
+
+**Symptom**:
+```text
+Conversion of type 'this' to type 'SafeHttpRequestBuilder<Has | "method">' may be a mistake
+because neither type sufficiently overlaps with the other.
+```
+
+### Root Cause
+In the Typestate pattern:
+```typescript
+class SafeHttpRequestBuilder<Has extends string = never> {
+  method(method: Method): SafeHttpRequestBuilder<Has | "method"> {
+    this._method = method;
+    return this as unknown as SafeHttpRequestBuilder<Has | "method">;
+  }
+}
+```
+TypeScript sees `this` having type `SafeHttpRequestBuilder<Has>`, which is different from `SafeHttpRequestBuilder<Has | "method">`. Because the generic parameters don't strictly overlap, TypeScript forbids direct casting (`this as SafeHttpRequestBuilder<...>`).
+
+### Fix
+Cast through `unknown`:
+```typescript
+return this as unknown as SafeHttpRequestBuilder<Has | "method">;
+```
+`unknown` is the top type in TypeScript; any type can be cast to `unknown`, and `unknown` can be cast to any target type.
+
+---
+
+## Problem 4 — Deep Comparison: Compile-Time vs Runtime Safety
+
+From the exercise reflection:
+
+| Language | Compile-Time Safety on Required Fields? | Runtime Validation? | Complexity Cost |
+| :--- | :--- | :--- | :--- |
+| **Rust** | Yes (Typestate struct transitions) | Optional (`Result<T, E>`) | Medium (Multiple structs or generics) |
+| **TypeScript** | Yes (Phantom `<Has extends string = never>`) | Yes (`throw new Error(...)`) | High (Complex phantom types & double casts) |
+| **C++20** | Optional (via Concepts or Builder states) | Yes (`throw std::invalid_argument`) | Medium |
+| **JavaScript** | No compile-time safety | Yes (`throw new Error(...)`) | Lowest boilerplate |
+
+<Callout type="warn">
+**Production Reality**: In TypeScript, a plain configuration object (`HttpRequestOptions`) with optional properties and default destructuring is almost always superior to a Builder class unless assembling requests across asynchronous middleware chains.
+</Callout>

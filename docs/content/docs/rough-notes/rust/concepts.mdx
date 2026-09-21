@@ -1,0 +1,331 @@
+---
+title: "Rust – Concepts I Learned"
+description: "Core Rust concepts and mental models I built while implementing design patterns."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+> **Source of truth**: extracted from real coding sessions in the `DesignPattern` workspace.
+
+---
+
+## Concept 1 — `struct Editor<D: Document>` and Monomorphization
+
+Here is a breakdown of how this code works in Rust, what each part means under the hood, and what design concept it represents.
+
+---
+
+### 1. Line-by-Line Breakdown
+
+#### The Struct Definition
+```rust
+struct Editor<D: Document> {
+    document: D
+}
+```
+* **`<D: Document>` (Generic Type with a Trait Bound)**:
+  * `D` is a generic type parameter (a placeholder for any type).
+  * `: Document` is a **trait bound**. It acts as a strict compile-time requirement: *"`D` can be any type, as long as that type implements the `Document` trait."*
+  * If someone tries to create `Editor` with a type like `i32` or `String` that doesn't implement `Document`, the compiler will refuse to build it.
+* **`document: D` (Field)**:
+  * The `Editor` struct owns an instance of type `D`.
+
+---
+
+#### The Implementation Block
+```rust
+impl<D: Document> Editor<D> {
+    fn new(document: D) -> Self {
+        Editor { document }
+    }
+
+    fn run(&self) {
+        self.document.open();
+        self.document.edit();
+        self.document.save();
+    }
+}
+```
+
+* **`impl<D: Document> Editor<D>`**:
+  * Tells the compiler: *"Implement these methods for any `Editor` where `D` implements `Document`."*
+* **`fn new(document: D) -> Self`**:
+  * The constructor function.
+  * Takes ownership of a `document` of type `D`.
+  * `Self` is an alias for `Editor<D>`.
+* **`fn run(&self)`**:
+  * Borrows `self` immutably (`&self`).
+  * Because the compiler knows `D: Document`, it guarantees that `self.document` has the methods `.open()`, `.edit()`, and `.save()`.
+  * It executes those operations in sequence.
+
+---
+
+### 2. Rust Performance Under the Hood: Monomorphization
+
+Because this uses generics (`<D: Document>`), Rust uses **static dispatch** (monomorphization):
+
+* When you write:
+  ```rust
+  let pdf_editor = Editor::new(PdfDocument);
+  let word_editor = Editor::new(WordDocument);
+  ```
+* The compiler generates two separate, specialized structs at compile time behind the scenes:
+  1. `Editor_PdfDocument`
+  2. `Editor_WordDocument`
+* **Zero Runtime Overhead**:
+  * There are **no dynamic lookups** or heap allocations (no `vtable`, no `Box`).
+  * The compiler knows the exact function to call for `.open()`, `.edit()`, and `.save()` and can even inline them directly for maximum performance.
+  * Since `PdfDocument` and `WordDocument` are unit structs (`struct PdfDocument;`), they are **Zero-Sized Types (ZST)**. `Editor` takes **0 bytes** in memory!
+
+---
+
+### 3. What Pattern is This?
+
+From an architecture perspective, this is:
+
+* **Composition**: `Editor` *has-a* `Document` rather than inheriting from one.
+* **Dependency Injection**: Rather than creating the document internally, `new(document)` accepts the dependency from the caller.
+* **Strategy Pattern**: `Editor` is the context, and `Document` represents the interchangeable strategy / behavior algorithm that changes how `open()`, `edit()`, and `save()` behave.
+
+---
+
+## Concept 2 — Generics `<F, D>` and Why They Are Required
+
+The reason this looks confusing is because of **Rust's closure syntax (`||`)** and **generic trait bounds (`where`)**. 
+
+Here is the explanation broken down into two parts: first, why `|| WordDocument` **is** actually a function, and second, what `<F, D>` and `where` mean.
+
+---
+
+### 1. Why `|| WordDocument` is a Function, NOT a Document
+
+In Rust, the vertical pipes `||` define an **anonymous function (a closure)**.
+
+```rust
+|| WordDocument
+```
+
+This is **not** passing a `WordDocument` directly. It is passing a **function with 0 arguments that returns a `WordDocument` when called**.
+
+If you know other languages, here is the exact equivalent:
+
+| Language | How you write it |
+| :--- | :--- |
+| **Rust** | `|| WordDocument` |
+| **JavaScript / TypeScript** | `() => new WordDocument()` |
+| **Python** | `lambda: WordDocument()` |
+| **C++** | `[]() { return WordDocument{}; }` |
+
+#### Compare the two:
+```rust
+// THIS WOULD BE PASSING THE DOCUMENT DIRECTLY (and would fail to compile!):
+run_editor(WordDocument); 
+
+// THIS PASSES A FACTORY FUNCTION THAT PRODUCES THE DOCUMENT:
+run_editor(|| WordDocument); 
+```
+
+The empty pipes `||` mean *"takes zero parameters"*. Inside the closure, the expression `WordDocument` is evaluated and returned whenever the closure is invoked.
+
+---
+
+### 2. What do `<F, D>` and `where` Mean?
+
+Let's break down the function signature piece by piece:
+
+```rust
+fn run_editor<F, D>(create: F) 
+where  
+    F: Fn() -> D,
+    D: Document,
+{
+    let doc = create(); // <--- Calls the function!
+    doc.open();
+    doc.edit();
+    doc.save();
+}
+```
+
+#### A. What does `<F, D>` do?
+The angle brackets `<...>` declare **generic type placeholders** (just like `<T>` in TypeScript, C++, or Java).
+* `F`: placeholder for the type of the **Factory / Function**.
+* `D`: placeholder for the type of the **Document**.
+* `(create: F)`: the function accepts a parameter named `create` whose type is `F`.
+
+---
+
+#### B. What does `where` do?
+`where` sets the **rules (trait bounds)** that those types must satisfy.
+
+Without `where`, Rust wouldn't know what `F` and `D` are allowed to do. The `where` clause specifies:
+
+1. **`F: Fn() -> D`**
+   * `F` must be a callable function/closure (`Fn`).
+   * `()` means it takes **0 arguments**.
+   * `-> D` means it **returns** something of type `D`.
+
+2. **`D: Document`**
+   * Whatever type `D` is returned, it must implement the [`trait Document`](file:///Users/prakharsachan/Developer/DesignPattern/03_Factory_Method/rs/src/main.rs#L1). This guarantees that `doc.open()`, `doc.edit()`, and `doc.save()` exist.
+
+---
+
+### 3. Alternative Syntax (Without `where`)
+
+In Rust, the `where` keyword is just a cleaner way of writing bounds. You could also write the exact same function inline like this:
+
+```rust
+fn run_editor<F: Fn() -> D, D: Document>(create: F) {
+    let doc = create();
+    doc.open();
+    doc.edit();
+    doc.save();
+}
+```
+Both are identical to the compiler, but `where` is preferred in idiomatic Rust when type bounds get long.
+
+---
+
+### 4. Step-by-Step Execution Trace
+
+When you call:
+```rust
+run_editor(|| WordDocument);
+```
+
+1. **Pass**: You pass the closure `|| WordDocument` into `run_editor` as the argument `create`.
+2. **Invoke**: Inside `run_editor`, line `let doc = create();` actually **runs** that closure.
+3. **Produce**: The closure runs, creating an instance of `WordDocument`.
+4. **Use**: `doc.open()`, `doc.edit()`, and `doc.save()` run on that newly created document.
+
+---
+
+## Concept 3 — Why `<F, D>` Specifically and Not Just `impl Trait`
+
+You might naturally wonder:  
+> *"Why can't I just write something simple like `fn run_editor(create: Fn() -> Document)`?"*
+
+If you try to write that, Rust will give you compiler errors. There are **3 fundamental reasons** why generic placeholders `<F, D>` are required here:
+
+---
+
+### Reason 1: Every Closure in Rust Has a Unique, "Nameless" Type (`F`)
+
+In languages like JavaScript or Python, all functions are just general objects. But in Rust:
+* **Every single closure you create has its own unique, anonymous struct type generated by the compiler.**
+
+When you write:
+```rust
+run_editor(|| WordDocument); // Compiler invents: struct Closure_A;
+run_editor(|| PdfDocument);  // Compiler invents: struct Closure_B;
+```
+Neither you nor the compiler have a human-readable name for `Closure_A` or `Closure_B`. 
+
+Because you cannot write their literal type name in the function signature, you **must** use a generic placeholder `F`:
+```rust
+fn run_editor<F>(create: F)
+```
+This tells Rust: *"I don't know the exact name of the closure's type in advance. Just let `F` be a placeholder for whatever closure the caller passes in."*
+
+---
+
+### Reason 2: Stack Memory Needs to Know the Exact Size (`D`)
+
+Look at line 74 inside the function:
+```rust
+let doc = create();
+```
+`doc` is allocated right on the CPU stack. 
+
+* In Rust, traits like `Document` are **unsized** (`!Sized`) because different structs implementing `Document` can have completely different sizes in memory:
+  * A `WordDocument` might have fields totaling `32 bytes`.
+  * A `PdfDocument` might have fields totaling `128 bytes`.
+
+If you tried to return the trait directly without a generic type `D`:
+> **The compiler would ask:** *"How many bytes of stack memory should I reserve for `let doc`? 32 bytes? 128 bytes? I can't know!"*
+
+By using the generic placeholder `D: Document`:
+* When you pass `|| WordDocument`, Rust substitutes `D = WordDocument` and reserves exactly `WordDocument`'s size.
+* When you pass `|| PdfDocument`, Rust substitutes `D = PdfDocument` and reserves `PdfDocument`'s size.
+
+---
+
+### Reason 3: Zero-Cost Performance (Monomorphization)
+
+Because of `<F, D>`, Rust does **Monomorphization** at compile time:
+
+Instead of creating one slow function that uses pointers and lookups, the compiler automatically generates two lightning-fast specialized functions:
+1. `run_editor_Word(create: Closure_A)`
+2. `run_editor_Pdf(create: Closure_B)`
+
+There are:
+* **Zero heap allocations** (no `Box`).
+* **Zero dynamic lookups** (no `vtable` or pointer indirection).
+* The compiler can even inline `doc.open()`, `doc.edit()`, and `doc.save()` directly into machine code.
+
+---
+
+### Bonus: Can We Make It Slightly Shorter?
+
+Yes! In modern Rust, you can use the `impl Trait` syntax for `F` so you don't have to name both placeholders:
+
+```rust
+fn run_editor<D: Document>(create: impl Fn() -> D) {
+    let doc = create();
+    doc.open();
+    doc.edit();
+    doc.save();
+}
+```
+Here, `create: impl Fn() -> D` hides `F`, but `D` is still kept as a generic placeholder so Rust knows the concrete return type and its exact size.
+
+---
+
+## Concept 4 — Dynamic Dispatch (Box&lt;dyn Trait&gt;) vs Enum in Abstract Factory
+
+You are completely right: **both approaches support runtime OS selection**. In both cases, your application decides at runtime (e.g. from an environment variable, config file, or string check) whether to create Windows or Mac UI components.
+
+The difference lies in **how Rust executes that choice under the hood**, specifically regarding **memory allocation, dispatch mechanisms, and code extensibility** (the classic *Expression Problem*).
+
+---
+
+### Quick Comparison
+
+| Feature | Approach 1: Trait Objects (`Box<dyn ...>`) | Approach 2: Enums / Parameterized |
+| :--- | :--- | :--- |
+| **Dispatch** | **Dynamic dispatch** (via Vtables & fat pointers) | **Static dispatch** (via `match` jump tables/branches) |
+| **Memory Allocation** | **Heap allocated** (`Box::new(...)`) | **Stack allocated** (0 heap allocations) |
+| **Inlining & Performance** | Cannot inline virtual calls through `dyn` | Highly optimizable & inlinable by `rustc` |
+| **Adding a New OS (Family)** | **Open**: Add new structs without modifying existing code | **Closed**: Must edit `enum Os` and all `match` blocks |
+| **Adding a New Product (Component)**| **Hard**: Modifying `GuiFactory` trait breaks all factories | **Easy**: Just add a new struct and a method on `GuiFactory` |
+| **GoF Pattern Purity** | Classic GoF Abstract Factory (OOP style) | Parameterized / Data-Driven Factory (Idiomatic Rust) |
+
+---
+
+### Deep Dive into the Differences
+
+#### 1. Memory: Heap vs. Stack
+* **Approach 1 (`Box<dyn Trait>`)**: 
+  Every factory and product (`Box<dyn Button>`, `Box<dyn Checkbox>`, `Box<dyn GuiFactory>`) allocates memory on the **heap**. This introduces allocator overhead, memory fragmentation, and cache misses due to pointer indirection.
+* **Approach 2 (`enum Os`)**: 
+  `enum Os` is a single byte (a discriminant). Both `Button` and `Checkbox` are tiny stack-allocated values. There is **zero heap allocation**.
+
+#### 2. Dispatch: Vtables vs. Branching
+* **Approach 1**:
+  When you call `button.paint()`, the CPU reads the vtable pointer inside the fat pointer `dyn Button` and jumps to the function address at runtime. Because this is indirect, LLVM cannot easily inline the call.
+* **Approach 2**:
+  When you call `button.paint()`, it executes a simple `match self.os`. The compiler knows all code paths at compile time, allowing it to inline the function body or optimize branch prediction.
+
+#### 3. Extensibility (The "Expression Problem")
+
+This is the most important architectural tradeoff:
+
+* **When Approach 1 is better (Plugin / Library Architectures)**:
+  If you publish your UI framework as a library, third-party crates can implement `LinuxFactory` and `LinuxButton` without modifying your original library code.
+* **When Approach 2 is better (Known, Closed Domain)**:
+  If the supported OS targets are fixed and known within your crate (e.g., Windows, Mac, Linux), `enum` leverages the compiler's **exhaustive pattern matching**. If you add `Os::Linux`, the compiler will refuse to build until you implement it in every `match` block across all components, preventing missing implementations at compile time.
+
+---
+
+### Summary Rule of Thumb
+* Use **Approach 1 (Traits + `dyn`)** if the set of families must be **open-ended / pluggable** (e.g., external plugins can provide new OS implementations).
+* Use **Approach 2 (Enums)** if the set of families is **known and closed**, and you want **maximum performance, zero heap allocations, and exhaustive compiler checks**.

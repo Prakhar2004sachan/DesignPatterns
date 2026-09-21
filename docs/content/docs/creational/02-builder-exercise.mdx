@@ -1,0 +1,234 @@
+---
+title: 02. Builder Exercise
+description: Hands-on exercise building a fluent SQL Query Builder across Rust, C++, and TypeScript with step-by-step hints and solutions.
+---
+
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+
+## The Challenge: Fluent SQL Query Builder
+
+Implement a fluent **SQL Query Builder** that constructs a `SELECT` query.
+
+### Target Query Format
+```sql
+SELECT id, username, email FROM users WHERE status = 'active' AND age >= 18 ORDER BY created_at DESC LIMIT 10 OFFSET 20;
+```
+
+### Requirements
+1. Methods for:
+   - `from(table)`
+   - `select(fields)`
+   - `where_clause(condition)` (can be called multiple times, chained with `AND`)
+   - `order_by(column, direction)`
+   - `limit(count)`
+   - `offset(count)`
+   - `build()` returning the complete SQL string.
+2. Must validate that `from(table)` was called before `build()`.
+3. Rust challenge: Try implementing `from` requirement using the **Typestate pattern** so calling `build()` without `from()` fails at compile time!
+
+---
+
+## Progressive Hints
+
+<Accordions>
+  <Accordion title="Hint 1: Data Structure">
+    The builder should accumulate query components:
+    - `table: Option<String>`
+    - `fields: Vec<String>` (default to `["*"]` if empty)
+    - `conditions: Vec<String>` (joined by `" AND "`)
+    - `order_by: Option<String>`
+    - `limit: Option<usize>`
+    - `offset: Option<usize>`
+  </Accordion>
+
+  <Accordion title="Hint 2: Method Chaining in C++ and TypeScript">
+    In C++, return `QueryBuilder&` (`*this`).
+    In TypeScript, return `this`.
+  </Accordion>
+
+  <Accordion title="Hint 3: Typestate in Rust">
+    Define marker structs `struct NoTable;` and `struct HasTable;`.
+    Implement `build()` only on `QueryBuilder<HasTable>`.
+  </Accordion>
+</Accordions>
+
+---
+
+## Complete Solution
+
+<Tabs items={['Rust', 'C++', 'TypeScript']}>
+  <Tab value="Rust">
+```rust
+pub struct NoTable;
+pub struct HasTable;
+
+pub struct QueryBuilder<State> {
+    state: std::marker::PhantomData<State>,
+    table: String,
+    fields: Vec<String>,
+    conditions: Vec<String>,
+    limit_val: Option<usize>,
+}
+
+impl QueryBuilder<NoTable> {
+    pub fn new() -> Self {
+        QueryBuilder {
+            state: std::marker::PhantomData,
+            table: String::new(),
+            fields: Vec::new(),
+            conditions: Vec::new(),
+            limit_val: None,
+        }
+    }
+
+    pub fn from(self, table: &str) -> QueryBuilder<HasTable> {
+        QueryBuilder {
+            state: std::marker::PhantomData,
+            table: table.to_string(),
+            fields: self.fields,
+            conditions: self.conditions,
+            limit_val: self.limit_val,
+        }
+    }
+}
+
+impl QueryBuilder<HasTable> {
+    pub fn select(mut self, field: &str) -> Self {
+        self.fields.push(field.to_string());
+        self
+    }
+
+    pub fn where_clause(mut self, condition: &str) -> Self {
+        self.conditions.push(condition.to_string());
+        self
+    }
+
+    pub fn limit(mut self, n: usize) -> Self {
+        self.limit_val = Some(n);
+        self
+    }
+
+    pub fn build(self) -> String {
+        let fields = if self.fields.is_empty() { "*".to_string() } else { self.fields.join(", ") };
+        let mut query = format!("SELECT {} FROM {}", fields, self.table);
+        if !self.conditions.is_empty() {
+            query.push_str(&format!(" WHERE {}", self.conditions.join(" AND ")));
+        }
+        if let Some(l) = self.limit_val {
+            query.push_str(&format!(" LIMIT {}", l));
+        }
+        query.push(';');
+        query
+    }
+}
+```
+  </Tab>
+
+  <Tab value="C++">
+```cpp
+#include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
+
+class QueryBuilder {
+private:
+    std::string table;
+    std::vector<std::string> fields;
+    std::vector<std::string> conditions;
+    int limitVal = -1;
+
+public:
+    QueryBuilder& from(std::string t) {
+        table = std::move(t);
+        return *this;
+    }
+
+    QueryBuilder& select(std::string field) {
+        fields.push_back(std::move(field));
+        return *this;
+    }
+
+    QueryBuilder& where(std::string cond) {
+        conditions.push_back(std::move(cond));
+        return *this;
+    }
+
+    QueryBuilder& limit(int l) {
+        limitVal = l;
+        return *this;
+    }
+
+    std::string build() const {
+        if (table.empty()) throw std::runtime_error("FROM table is required");
+        std::ostringstream ss;
+        ss << "SELECT ";
+        if (fields.empty()) ss << "*";
+        else {
+            for (size_t i = 0; i < fields.size(); ++i) {
+                if (i > 0) ss << ", ";
+                ss << fields[i];
+            }
+        }
+        ss << " FROM " << table;
+        if (!conditions.empty()) {
+            ss << " WHERE ";
+            for (size_t i = 0; i < conditions.size(); ++i) {
+                if (i > 0) ss << " AND ";
+                ss << conditions[i];
+            }
+        }
+        if (limitVal >= 0) ss << " LIMIT " << limitVal;
+        ss << ";";
+        return ss.str();
+    }
+};
+```
+  </Tab>
+
+  <Tab value="TypeScript">
+```typescript
+class QueryBuilder {
+  private table?: string;
+  private fields: string[] = [];
+  private conditions: string[] = [];
+  private limitVal?: number;
+
+  from(t: string): this {
+    this.table = t;
+    return this;
+  }
+
+  select(...fields: string[]): this {
+    this.fields.push(...fields);
+    return this;
+  }
+
+  where(condition: string): this {
+    this.conditions.push(condition);
+    return this;
+  }
+
+  limit(count: number): this {
+    this.limitVal = count;
+    return this;
+  }
+
+  build(): string {
+    if (!this.table) throw new Error("FROM table is required.");
+    const fieldStr = this.fields.length > 0 ? this.fields.join(", ") : "*";
+    let query = `SELECT ${fieldStr} FROM ${this.table}`;
+    if (this.conditions.length > 0) {
+      query += ` WHERE ${this.conditions.join(" AND ")}`;
+    }
+    if (this.limitVal !== undefined) {
+      query += ` LIMIT ${this.limitVal}`;
+    }
+    return query + ";";
+  }
+}
+```
+  </Tab>
+</Tabs>

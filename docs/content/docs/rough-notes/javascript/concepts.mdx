@@ -1,0 +1,121 @@
+---
+title: "JavaScript – Concepts I Learned"
+description: "Key JavaScript concepts I understood while implementing Factory Method."
+---
+
+import { Callout } from 'fumadocs-ui/components/callout';
+
+---
+
+## Concept 1 — Why We `throw new Error` in Abstract Base Classes
+
+The reason we write `throw new Error(...)` is because **JavaScript does not have native `abstract` classes or `interface` keywords**.
+
+In languages you used earlier:
+* **C++**: you had `virtual void open() = 0;` (the compiler forces child classes to implement it).
+* **Rust**: you had `trait Document { fn open(&self); }` (the compiler guarantees implementation).
+
+JavaScript doesn't have a compiler to check this. Throwing an error is how we **simulate an abstract class / contract at runtime**.
+
+---
+
+### 1. What happens if you DON'T throw an error?
+
+Suppose you left them empty:
+
+```js
+class Document {
+  open() {}
+  edit() {}
+  save() {}
+}
+```
+
+Now imagine you (or a teammate) create a new document type tomorrow:
+```js
+class MarkdownDocument extends Document {
+  open() { console.log("Markdown: open"); }
+  // Forgot to implement edit() and save()!
+}
+```
+
+If someone runs this:
+```js
+const doc = new MarkdownDocument();
+doc.open(); // Works: "Markdown: open"
+doc.edit(); // Silently does nothing! Returns undefined.
+doc.save(); // Silently does nothing! Returns undefined.
+```
+* **Silent Failure**: JavaScript won't complain. It just climbs up the prototype chain, finds the empty function in `Document`, executes it, and quietly does nothing.
+* Your application now has a **silent bug** where documents aren't actually being edited or saved!
+
+---
+
+### 2. What happens when you THROW an error?
+
+```js
+class Document {
+  open() {
+    throw new Error("Abstract method 'open()' must be implemented by subclass");
+  }
+}
+```
+
+Now, if a subclass forgets to implement `open()`:
+* The program **immediately crashes with a clear, helpful message**.
+* It tells the developer right away: *"Hey! You created a subclass, but you forgot to implement `open()`!"*
+
+---
+
+### 3. Why it is especially critical for `createDocument()`
+
+In `DocumentEditor`:
+```js
+class DocumentEditor {
+  createDocument() {
+    throw new Error("Abstract Create Document");
+  }
+
+  run() {
+    const doc = this.createDocument();
+    doc.open();
+    doc.edit();
+    doc.save();
+  }
+}
+```
+
+If `createDocument()` was just an empty function returning nothing (`undefined`):
+```js
+const doc = this.createDocument(); // doc is undefined!
+doc.open(); // 💥 TypeError: Cannot read properties of undefined (reading 'open')
+```
+That `TypeError` is vague—it doesn't tell you *what* went wrong. 
+
+By throwing `"Abstract Create Document"`, anyone who writes `class BadEditor extends DocumentEditor` and forgets `createDocument()` immediately sees:
+```
+Error: Abstract Create Document
+```
+which pinpoints the exact mistake.
+
+---
+
+### Bonus: Preventing Direct Instantiation in JS
+
+If you want to stop people from doing `new Document()` or `new DocumentEditor()` directly, you can also use `new.target`:
+
+```js
+class Document {
+  constructor() {
+    if (new.target === Document) {
+      throw new Error("Cannot instantiate abstract class Document directly");
+    }
+  }
+
+  open() {
+    throw new Error("Abstract method 'open()' must be implemented");
+  }
+}
+
+new Document(); // 💥 Error: Cannot instantiate abstract class Document directly
+```

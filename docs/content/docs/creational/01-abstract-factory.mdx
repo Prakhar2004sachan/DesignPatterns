@@ -1,0 +1,334 @@
+---
+title: 01. Abstract Factory Pattern
+description: Provide an interface for creating families of related or dependent objects without specifying their concrete classes.
+---
+
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+
+## 1. Intent & Mental Model
+
+The **Abstract Factory Pattern** provides an interface for creating **families of related or dependent objects** without specifying their concrete classes.
+
+> **Beginner's Intuition:** Imagine you are building a cross-platform application UI. You have buttons, checkboxes, and windows. If a user is on macOS, they should see a Mac Button and a Mac Checkbox. If they are on Windows, they should see a Windows Button and a Windows Checkbox. You never want to accidentally mix a Mac Button inside a Windows Window. The Abstract Factory guarantees this by grouping the creation of these related components into a single "Factory". Instead of calling `new MacButton()`, you ask the factory `factory.createButton()`, and the factory ensures you get the right one for your environment.
+
+> **TL;DR:** The client code works exclusively with abstract factories and abstract products. At runtime, a concrete factory is supplied, producing a matching suite of products. You are guaranteed never to mix incompatible products (e.g. a Mac Button inside a Windows Window).
+
+<PatternDiagram chart={`
+graph TD
+    Client["Client Code"] --> AF["AbstractFactory<br/>(createButton(), createCheckbox())"]
+    AF --> WinFact["WinFactory"]
+    AF --> MacFact["MacFactory"]
+    
+    WinFact --> WinBtn["WinButton"]
+    WinFact --> WinChk["WinCheckbox"]
+    
+    MacFact --> MacBtn["MacButton"]
+    MacFact --> MacChk["MacCheckbox"]
+`} />
+
+---
+
+## 2. Multi-Language Rosetta Stone
+
+Here is the exact same UI Widget Family pattern implemented across all 4 languages:
+
+<Tabs items={['Rust', 'C++', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust">
+```rust
+// Product Traits
+pub trait Button {
+    fn render(&self);
+}
+pub trait Checkbox {
+    fn toggle(&self);
+}
+
+// Concrete Products: Windows
+pub struct WinButton;
+impl Button for WinButton {
+    fn render(&self) { println!("[Win] Rendering Button"); }
+}
+
+pub struct WinCheckbox;
+impl Checkbox for WinCheckbox {
+    fn toggle(&self) { println!("[Win] Toggling Checkbox"); }
+}
+
+// Concrete Products: Mac
+pub struct MacButton;
+impl Button for MacButton {
+    fn render(&self) { println!("[Mac] Rendering Button"); }
+}
+
+pub struct MacCheckbox;
+impl Checkbox for MacCheckbox {
+    fn toggle(&self) { println!("[Mac] Toggling Checkbox"); }
+}
+
+// Abstract Factory Trait
+pub trait GUIFactory {
+    fn create_button(&self) -> Box<dyn Button>;
+    fn create_checkbox(&self) -> Box<dyn Checkbox>;
+}
+
+// Concrete Factories
+pub struct WinFactory;
+impl GUIFactory for WinFactory {
+    fn create_button(&self) -> Box<dyn Button> { Box::new(WinButton) }
+    fn create_checkbox(&self) -> Box<dyn Checkbox> { Box::new(WinCheckbox) }
+}
+
+pub struct MacFactory;
+impl GUIFactory for MacFactory {
+    fn create_button(&self) -> Box<dyn Button> { Box::new(MacButton) }
+    fn create_checkbox(&self) -> Box<dyn Checkbox> { Box::new(MacCheckbox) }
+}
+
+// Client Code
+pub fn render_ui(factory: &dyn GUIFactory) {
+    let btn = factory.create_button();
+    let chk = factory.create_checkbox();
+    btn.render();
+    chk.toggle();
+}
+```
+  </Tab>
+
+  <Tab value="C++">
+```cpp
+#include <iostream>
+#include <memory>
+
+// Abstract Products
+class Button {
+public:
+    virtual ~Button() = default; // CRITICAL: virtual destructor!
+    virtual void render() const = 0;
+};
+
+class Checkbox {
+public:
+    virtual ~Checkbox() = default;
+    virtual void toggle() const = 0;
+};
+
+// Concrete Products
+class WinButton : public Button {
+public:
+    void render() const override { std::cout << "[Win] Button\n"; }
+};
+
+class WinCheckbox : public Checkbox {
+public:
+    void toggle() const override { std::cout << "[Win] Checkbox\n"; }
+};
+
+// Abstract Factory
+class GUIFactory {
+public:
+    virtual ~GUIFactory() = default;
+    virtual std::unique_ptr<Button> createButton() const = 0;
+    virtual std::unique_ptr<Checkbox> createCheckbox() const = 0;
+};
+
+// Concrete Factory
+class WinFactory : public GUIFactory {
+public:
+    std::unique_ptr<Button> createButton() const override {
+        return std::make_unique<WinButton>();
+    }
+    std::unique_ptr<Checkbox> createCheckbox() const override {
+        return std::make_unique<WinCheckbox>();
+    }
+};
+
+// Client
+void renderUI(const GUIFactory& factory) {
+    auto btn = factory.createButton();
+    auto chk = factory.createCheckbox();
+    btn->render();
+    chk->toggle();
+}
+```
+  </Tab>
+
+  <Tab value="TypeScript">
+```typescript
+interface Button {
+  render(): void;
+}
+
+interface Checkbox {
+  toggle(): void;
+}
+
+class WinButton implements Button {
+  render() { console.log("[Win] Button"); }
+}
+
+class WinCheckbox implements Checkbox {
+  toggle() { console.log("[Win] Checkbox"); }
+}
+
+interface GUIFactory {
+  createButton(): Button;
+  createCheckbox(): Checkbox;
+}
+
+class WinFactory implements GUIFactory {
+  createButton(): Button { return new WinButton(); }
+  createCheckbox(): Checkbox { return new WinCheckbox(); }
+}
+
+function renderUI(factory: GUIFactory) {
+  const btn = factory.createButton();
+  const chk = factory.createCheckbox();
+  btn.render();
+  chk.toggle();
+}
+```
+  </Tab>
+
+  <Tab value="JavaScript">
+```javascript
+class WinButton {
+  render() { console.log("[Win] Button"); }
+}
+
+class WinCheckbox {
+  toggle() { console.log("[Win] Checkbox"); }
+}
+
+class WinFactory {
+  createButton() { return new WinButton(); }
+  createCheckbox() { return new WinCheckbox(); }
+}
+
+function renderUI(factory) {
+  const btn = factory.createButton();
+  const chk = factory.createCheckbox();
+  btn.render();
+  chk.toggle();
+}
+```
+  </Tab>
+</Tabs>
+
+---
+
+## 3. Language Nuances & Gotchas
+
+<Tabs items={['Rust', 'C++', 'TypeScript', 'JavaScript']}>
+  <Tab value="Rust">
+    ### Trait vs Inherent Impl Confusion
+    Writing `impl GuiFactory for GuiFactory` causes a compiler error because `GuiFactory` is a **struct**, not a trait. In Rust, `impl Trait for Type` implements a trait on a type. For inherent constructors and methods, write `impl GuiFactory`:
+
+    ```rust
+    impl GuiFactory {
+        pub fn new(os: Os) -> Self { GuiFactory { os } }
+        pub fn create_button(&self) -> Button { Button { os: self.os } }
+    }
+    ```
+
+    ### Enum Dispatch vs `Box<dyn Trait>`
+    | Approach | When to Use | Memory & Dispatch |
+    | :--- | :--- | :--- |
+    | `enum Os` + `match` | Closed family set (known at compile time) | **Stack allocated**, 0 heap allocation, static inlining |
+    | `Box<dyn GUIFactory>` | Open family set (external plugins/crates) | **Heap allocated**, dynamic vtable dispatch |
+
+    <Callout type="warn">
+    Trait objects are unsized (`!Sized`). Returning `fn create_button(&self) -> dyn Button` fails at compile time. Always wrap trait objects in `Box<dyn Button>`.
+    </Callout>
+  </Tab>
+
+  <Tab value="C++">
+    ### Forgetting Virtual Destructor $\rightarrow$ Silent Resource Leak
+    If `class Button` does not declare `virtual ~Button() = default;`:
+
+    ```cpp
+    std::unique_ptr<Button> btn = factory.createButton(); // Points to WinButton
+    // btn goes out of scope → ~Button() runs, but ~WinButton() is SKIPPED!
+    ```
+
+    No compiler error is raised by default. Any heap buffers or open handles inside `WinButton` will leak silently.
+
+    <Callout type="warn">
+    **Golden Rule**: Any class with at least one virtual method **must** declare `virtual ~Base() = default;`.
+    </Callout>
+
+    ### Object Slicing
+    Writing `Button btn = winFactory.createButton();` (without pointer/reference) slices off the derived fields, copying only the base slice. Always store polymorphic products as `std::unique_ptr<Button>`.
+  </Tab>
+
+  <Tab value="TypeScript">
+    ### TypeScript `enum` Has Runtime Cost
+    ```typescript
+    enum Os { Windows, Mac }
+    ```
+    Creates both a runtime JS object and a type. Under Node 22 `--experimental-strip-types`, TypeScript enums throw syntax errors because they generate executable code.
+
+    **Idiomatic Alternative**: Use `const` object with lookup types:
+    ```typescript
+    const Os = { Windows: "Windows", Mac: "Mac" } as const;
+    type Os = (typeof Os)[keyof typeof Os];
+    ```
+
+    ### Object Literal Factories
+    TypeScript's structural typing allows defining factories as plain object literals without class hierarchies:
+    ```typescript
+    const winFactory: GUIFactory = {
+      createButton: () => new WinButton(),
+      createCheckbox: () => new WinCheckbox(),
+    };
+    ```
+  </Tab>
+
+  <Tab value="JavaScript">
+    ### Duck Typing & Factory Functions
+    In JavaScript, an abstract factory does not need `class` or `interface`. A plain factory function returning an object with methods is the cleanest pattern:
+
+    ```javascript
+    function createGuiFactory(os) {
+      return {
+        createButton: () => ({ render: () => console.log(`[${os}] Button`) }),
+        createCheckbox: () => ({ toggle: () => console.log(`[${os}] Checkbox`) }),
+      };
+    }
+    ```
+
+    <Callout type="info">
+    If using ES6 classes for factories, remember to guard abstract base constructors with `if (new.target === BaseFactory) throw new Error(...)`.
+    </Callout>
+  </Tab>
+</Tabs>
+
+
+---
+
+## 4. Pitfall Quick Reference
+
+<Accordions>
+  <Accordion title="Rust: dyn Button without Box — compiler error">
+    `fn create_button(&self) -> dyn Button` fails — trait objects are unsized.
+    Fix: `-> Box<dyn Button>`.
+  </Accordion>
+  <Accordion title="C++: Object Slicing when not using pointers">
+    `Button btn = winFactory.createButton();` copies only the `Button` base slice.
+    Fix: always store polymorphic objects through `unique_ptr<Button>` or `Button&`.
+  </Accordion>
+  <Accordion title="TypeScript: Mixing factories from different families">
+    TypeScript structural typing won't prevent `winFactory.createButton()` from being passed to a Mac renderer. Use branded types or runtime checks if cross-family mixing must be caught.
+  </Accordion>
+</Accordions>
+
+---
+
+## 5. Hands-On Practice
+
+Ready to test yourself? Check out the **Database Connection & Command** exercise:
+
+**[Go to 01. Abstract Factory Exercise & Solution](/docs/creational/01-abstract-factory-exercise)**
+
+**Per-language rough notes:** [Rust](/docs/rough-notes/rust/problems) · [C++](/docs/rough-notes/cpp/problems) · [TypeScript](/docs/rough-notes/typescript/concepts)
